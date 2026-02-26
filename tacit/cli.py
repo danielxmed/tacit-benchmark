@@ -76,12 +76,25 @@ def generate(
     if config:
         cfg = yaml.safe_load(Path(config).read_text())
         click.echo(f"Generating from config: {config}")
-        # TODO: iterate over configured tasks and generate
+
+        from scripts.publish_hf import build_snapshot_structure
+
+        out = Path(output_dir)
+        resolutions = sorted(cfg.get("resolutions", [512]))
+        build_snapshot_structure(
+            out,
+            cfg,
+            use_generators=True,
+            resolutions=resolutions,
+            progress_callback=lambda label: click.echo(f"  generated {label}"),
+        )
+        click.echo(f"Done — output at {out}")
     elif task:
         click.echo(
             f"Generating {count} {task} puzzles at {difficulty} difficulty (seed={seed})"
         )
-        # TODO: instantiate generator and run
+        # Single-task path kept as echo-only: not all generators handle
+        # DifficultyParams(level=..., params={}) with empty params.
     else:
         raise click.UsageError("Provide --task or --config")
 
@@ -150,11 +163,47 @@ def evaluate(
     default=None,
     help="Version tag (default: from pyproject.toml)",
 )
+@click.option(
+    "--output-dir",
+    type=click.Path(),
+    default="snapshot",
+    help="Output directory for snapshot (default: snapshot/)",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Build snapshot locally without uploading to HuggingFace.",
+)
 def publish(
     config: str,
     hf_repo: str,
     version_tag: str | None,
+    output_dir: str,
+    dry_run: bool,
 ) -> None:
     """Generate and publish frozen snapshot to HuggingFace."""
+    from scripts.publish_hf import build_snapshot_structure, upload_to_hf
+
+    cfg = yaml.safe_load(Path(config).read_text())
+    out = Path(output_dir)
+    resolutions = sorted(cfg.get("resolutions", [512]))
+
     click.echo(f"Publishing to {hf_repo}")
-    # TODO: generate full suite, compute checksums, push to HF
+    click.echo(f"Building snapshot in {out} ...")
+
+    build_snapshot_structure(
+        out,
+        cfg,
+        use_generators=True,
+        resolutions=resolutions,
+        progress_callback=lambda label: click.echo(f"  generated {label}"),
+    )
+    click.echo(f"Snapshot created at {out}")
+
+    if not dry_run:
+        click.echo(f"Uploading to {hf_repo} ...")
+        upload_to_hf(snapshot_dir=out, repo_id=hf_repo)
+        click.echo("Upload complete.")
+    else:
+        click.echo("Dry-run mode: skipping HuggingFace upload.")

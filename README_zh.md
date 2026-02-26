@@ -96,8 +96,11 @@ pip install -e ".[all]"
 # 为单个任务生成题目
 tacit generate --task maze --difficulty easy --count 10 --seed 42
 
-# 使用配置文件生成完整基准测试集
+# 使用配置文件生成开发测试集 (300 道题目)
 tacit generate --config configs/default.yaml
+
+# 生成正式发布集 (6,000 道题目 × 3 分辨率)
+tacit generate --config configs/release.yaml --output-dir snapshot/
 ```
 
 ### 评估模型
@@ -114,7 +117,7 @@ tacit evaluate --track discriminative --model-output ./results/ --tasks all
 
 ```bash
 # 生成并发布冻结快照至 HuggingFace
-tacit publish --config configs/full_release.yaml --hf-repo tylerxdurden/TACIT-benchmark
+tacit publish --config configs/release.yaml --hf-repo tylerxdurden/TACIT-benchmark --dry-run
 ```
 
 ---
@@ -151,8 +154,8 @@ tacit_benchmark_0.1.0/
 │       ├── metrics.py               # 评分与聚合
 │       └── report.py                # 评估报告生成
 ├── configs/
-│   ├── default.yaml                 # 开发/测试配置
-│   └── full_release.yaml            # 完整基准测试配置
+│   ├── default.yaml                 # 开发/测试配置 (10 per difficulty)
+│   └── release.yaml                 # 正式发布配置 (200 per difficulty, 多分辨率)
 ├── tests/                           # 测试套件
 └── data/                            # 生成数据 (已加入 .gitignore)
 ```

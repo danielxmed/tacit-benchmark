@@ -164,6 +164,18 @@ class BaseGenerator(ABC):
 | `OrthoProjectionGenerator` | `ortho_projection` | `generators/ortho_projection.py` |
 | `IsoReconstructionGenerator` | `iso_reconstruction` | `generators/iso_reconstruction.py` |
 
+### 生成器注册表 (`tacit/generators/registry.py`)
+
+注册表模块提供任务名称到生成器类的集中映射,供 CLI 和发布管线使用:
+
+```python
+from tacit.generators.registry import get_generator
+
+gen = get_generator("maze")  # 返回 MazeGenerator 实例
+```
+
+`GENERATOR_CLASSES` 是 `{task_name: (module_path, class_name)}` 元组字典。生成器按需延迟导入以保持启动速度。
+
 ### 共享工具模块
 
 部分生成器共享内部工具模块:
@@ -234,7 +246,7 @@ STYLE = {
 | 阶段 | 格式 | 说明 |
 |------|------|------|
 | 生成 | SVG | 矢量格式,无损,精确 |
-| 分发 | PNG (256, 512, 1024) | 多分辨率,兼容性好 |
+| 分发 | PNG (512, 1024, 2048) | 多分辨率,兼容性好 |
 | 研究 | SVG (可选) | 原始矢量文件,供需要的研究者使用 |
 
 ---
@@ -422,6 +434,8 @@ tacit publish [OPTIONS]
 | `--config` | Path | 生成配置文件(必选) |
 | `--hf-repo` | str | HuggingFace 仓库(必选) |
 | `--version-tag` | str | 版本标签(默认从 pyproject.toml 读取) |
+| `--output-dir` | Path | 快照输出目录(默认: `snapshot/`) |
+| `--dry-run` | flag | 仅本地构建快照,不上传至 HuggingFace |
 
 ### 已知任务列表
 
@@ -446,7 +460,7 @@ KNOWN_TASKS = [
 version: "0.1.0"
 seed: 42
 output_dir: "data"
-resolutions: [256, 512]
+resolutions: [256, 512]           # 开发配置使用较小分辨率
 distractors_per_puzzle: 4
 
 tasks:
@@ -469,11 +483,11 @@ tasks:
 
 ### 正式发布配置
 
-`configs/full_release.yaml` 用于生成完整的基准测试集:
-- `count_per_difficulty: 200`
-- `resolutions: [256, 512, 1024]`
-- `distractors_per_puzzle: 6`
-- 新增 `expert` 难度级别
+`configs/release.yaml` 用于生成完整的基准测试集:
+- `count_per_difficulty: 200` (6,000 道题目)
+- `resolutions: [512, 1024, 2048]` (三种分辨率)
+- `distractors_per_puzzle: 4`
+- 难度级别: easy, medium, hard
 
 ---
 
@@ -482,72 +496,65 @@ tasks:
 ### 发布流程
 
 ```
-tacit publish --config configs/full_release.yaml --hf-repo tylerxdurden/TACIT-benchmark
+tacit publish --config configs/release.yaml --hf-repo tylerxdurden/TACIT-benchmark
 ```
 
 执行以下步骤:
 1. 读取配置文件
 2. 按配置生成所有任务的所有难度级别的谜题实例
-3. 将 SVG 光栅化为多分辨率 PNG
+3. 将 SVG 光栅化为多分辨率 PNG（一次 SVG 生成,多次光栅化）
 4. 计算每个文件的校验和(SHA-256)
 5. 生成元数据文件(版本、种子、生成参数、校验和)
 6. 推送至 HuggingFace 仓库
 
+生成过程包含重试逻辑（最多 3 次,使用种子偏移）以确保鲁棒性。
+
 ### HuggingFace 快照目录结构
+
+配置多分辨率（如 512, 1024, 2048）时,每个难度目录包含分辨率子目录:
 
 ```
 tylerxdurden/TACIT-benchmark/
 ├── README.md                      # 数据集卡片(包含引用信息)
-├── README_zh.md                   # 中文数据集卡片
 ├── metadata.json                  # 版本、种子、生成参数、校验和
 ├── task_01_maze/
+│   ├── task_info.json             # 难度轴描述、验证说明
 │   ├── easy/
-│   │   ├── puzzle_XXXX.png
-│   │   ├── solution_XXXX.png
-│   │   ├── distractors_XXXX/
-│   │   │   ├── distractor_0.png
-│   │   │   ├── distractor_1.png
+│   │   ├── meta_0000.json
+│   │   ├── 512/
+│   │   │   ├── puzzle_0000.png
+│   │   │   ├── solution_0000.png
+│   │   │   └── distractors_0000/
+│   │   │       ├── distractor_00.png
+│   │   │       └── ...
+│   │   ├── 1024/
+│   │   │   ├── puzzle_0000.png
 │   │   │   └── ...
-│   │   └── meta_XXXX.json
+│   │   └── 2048/
+│   │       ├── puzzle_0000.png
+│   │       └── ...
 │   ├── medium/
-│   │   └── ...
-│   ├── hard/
-│   │   └── ...
-│   └── task_info.json             # 难度轴描述、验证说明
+│   └── hard/
 ├── task_02_raven/
-│   └── ...
-├── task_03_ca_forward/
-│   └── ...
-├── task_04_ca_inverse/
-│   └── ...
-├── task_05_logic_grid/
-│   └── ...
-├── task_06_graph_coloring/
-│   └── ...
-├── task_07_graph_isomorphism/
-│   └── ...
-├── task_08_unknot/
-│   └── ...
-├── task_09_ortho_projection/
 │   └── ...
 └── task_10_iso_reconstruction/
     └── ...
 ```
 
-### 每个谜题实例的元数据格式
+单分辨率时,PNG 直接写入难度目录(无分辨率子目录)。
+
+### 每个谜题实例的元数据格式 (`meta_XXXX.json`)
 
 ```json
 {
     "task": "maze",
-    "difficulty": {"grid_size": 32, "layers": 3, "portals": 5},
+    "difficulty": "easy",
+    "difficulty_params": {"grid_size": 8, "layers": 1, "portals": 0},
     "seed": 42,
-    "puzzle_svg": "path/to/puzzle.svg",
-    "puzzle_png": {"256": "...", "512": "...", "1024": "..."},
-    "solution_svg": "path/to/solution.svg",
-    "solution_png": {"256": "...", "512": "...", "1024": "..."},
-    "distractors_png": ["distractor_0.png", "...", "distractor_N.png"],
-    "distractor_violations": ["wall_breach", "portal_skip", "..."],
-    "verification_hash": "sha256:..."
+    "puzzle_id": "maze_easy_0042",
+    "distractors_count": 4,
+    "distractor_violations": ["wall_breach", "portal_skip", "disconnected", "wrong_exit"],
+    "resolutions": [512, 1024, 2048]
 }
 ```
 
@@ -580,6 +587,7 @@ tacit_benchmark_0.1.0/
 │   ├── generators/                # 10 个任务生成器
 │   │   ├── __init__.py
 │   │   ├── base.py                # 抽象基类
+│   │   ├── registry.py            # 集中式任务→生成器映射
 │   │   ├── maze.py
 │   │   ├── raven.py
 │   │   ├── ca_forward.py
@@ -601,8 +609,8 @@ tacit_benchmark_0.1.0/
 │   │   └── report.py              # 报告生成
 │   └── cli.py                     # CLI 入口
 ├── configs/
-│   ├── default.yaml               # 开发/测试配置
-│   └── full_release.yaml          # 正式发布配置
+│   ├── default.yaml               # 开发/测试配置 (10 per difficulty)
+│   └── release.yaml               # 正式发布配置 (200 per difficulty, 多分辨率)
 ├── scripts/
 │   └── publish_hf.py              # HuggingFace 发布脚本
 ├── tests/                         # 测试套件
@@ -659,7 +667,7 @@ tacit_benchmark_0.1.0/
 | 干扰项设计 | 近似正确、单约束违反 | 防止赛道 2 退化为简单模式匹配 |
 | 图像格式 | SVG 生成 -> 多分辨率 PNG 分发 | 生成精确性与消费通用性兼得 |
 | 分发方式 | GitHub 仓库 + HuggingFace 冻结快照 | 可重现性(生成器) + 可比较性(快照) |
-| 规模设计 | v0.1.0 约 2,000-5,000 例,可扩展至 50,000+ | 配置驱动,无需代码变更即可扩展 |
+| 规模设计 | v0.1.0: 6,000 例 × 3 分辨率,可扩展至 50,000+ | 配置驱动,无需代码变更即可扩展 |
 | 渲染层 | 薄共享抽象,底层使用专用库 | 视觉一致性,避免过度工程化 |
 | 文档语言 | 英文 + 中文 | 从第一天起面向国际受众 |
 

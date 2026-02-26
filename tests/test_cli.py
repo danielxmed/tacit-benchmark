@@ -257,7 +257,7 @@ class TestPublishCommand:
 
         result = runner.invoke(
             main,
-            ["publish", "--config", str(sample_config), "--hf-repo", "user/repo"],
+            ["publish", "--config", str(sample_config), "--hf-repo", "user/repo", "--dry-run"],
         )
         assert result.exit_code == 0
         assert "user/repo" in result.output

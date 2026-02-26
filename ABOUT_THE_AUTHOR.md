@@ -9,7 +9,7 @@ This file provides context about the researcher authoring and maintaining this b
 **Full name:** Daniel Nobrega Medeiros  
 **Role:** ML Researcher & Physician  
 **Location:** Vassouras, RJ — Brazil  
-**Linkedin:** www.linkedin.com/in/daniel-nobrega-187272124 
+**Linkedin:** [linkedin.com/in/daniel-nobrega-187272124](https://www.linkedin.com/in/daniel-nobrega-187272124)  
 **GitHub:** [github.com/danielxmed](https://github.com/danielxmed)  
 **Google Scholar:** [scholar.google.com.br/citations?user=D_6AZoEAAAAJ](https://scholar.google.com.br/citations?user=D_6AZoEAAAAJ&hl=pt-BR)  
 **arXiv:** [arxiv.org/abs/2602.07061](https://arxiv.org/abs/2602.07061)

@@ -11,7 +11,7 @@
 TACIT Benchmark 提供双赛道评估体系,支持对生成式模型和判别式模型的视觉推理能力进行标准化测量。本文档详细说明两条评估赛道的输入输出规范、目录结构、结果格式以及完整的端到端评估流程。
 
 **核心设计原则:**
-- 所有验证均为确定性、程序化的结构验证,而非像素级匹配
+- 所有验证均为确定性、程序化的,采用基于CV的视觉解析器分析 PNG 图像
 - 每道谜题均附带近似错误的干扰项(distractor),用于判别式评估
 - 难度参数化,支持按任务、按难度级别的精细分析
 
@@ -21,29 +21,29 @@ TACIT Benchmark 提供双赛道评估体系,支持对生成式模型和判别式
 
 ### 任务描述
 
-模型接收谜题图像作为输入,需自主生成解答图像(SVG 格式)。评估系统通过结构解析器提取候选解答的语义结构,再调用对应任务生成器的 `verify()` 方法进行确定性验证。
+模型接收谜题图像(PNG 格式)作为输入,需自主生成解答图像(PNG 格式)。评估系统通过基于CV的视觉解析器分析候选解答 PNG,再调用对应任务生成器的 `verify()` 方法进行确定性验证。
 
 **评估流水线:**
 
 ```
-谜题图像 --> 模型 --> 候选解答 SVG --> 结构解析器 --> generator.verify() --> 通过/未通过
+谜题图像 (PNG) --> 模型 --> 候选解答 PNG --> 基于CV的视觉解析器 --> generator.verify() --> 通过/未通过
 ```
 
 **适用模型类型:**
 - 图像到图像生成模型
 - 强多模态生成模型
-- 任何能输出结构化 SVG 的系统
+- 任何能输出 PNG 图像的系统
 
 ### 模型输出目录结构
 
-模型需按以下目录结构组织输出文件。文件命名规则为 `{puzzle_id}.svg`,其中 `puzzle_id` 的格式为 `{task}_{difficulty}_{seed:04d}`。
+模型需按以下目录结构组织输出文件。文件命名规则为 `{puzzle_id}.png`,其中 `puzzle_id` 的格式为 `{task}_{difficulty}_{seed:04d}`。
 
 ```
 model_output/
 ├── maze/
 │   ├── easy/
-│   │   ├── maze_easy_0042.svg
-│   │   ├── maze_easy_0043.svg
+│   │   ├── maze_easy_0042.png
+│   │   ├── maze_easy_0043.png
 │   │   └── ...
 │   ├── medium/
 │   │   └── ...
@@ -51,7 +51,7 @@ model_output/
 │       └── ...
 ├── raven/
 │   ├── easy/
-│   │   ├── raven_easy_0042.svg
+│   │   ├── raven_easy_0042.png
 │   │   └── ...
 │   ├── medium/
 │   │   └── ...
@@ -77,20 +77,20 @@ model_output/
 
 ### 验证机制
 
-每个任务生成器实现独立的 `verify(puzzle, candidate_svg) -> VerificationResult` 方法。验证逻辑因任务而异:
+每个任务生成器实现独立的 `verify(puzzle, candidate_png) -> VerificationResult` 方法。验证器使用计算机视觉技术分析候选 PNG 图像。验证逻辑因任务而异:
 
 | 任务 | 验证方式 |
 |------|---------|
-| maze | 路径连通性检查:起点到终点、不穿墙、传送门合法 |
-| raven | 提取嵌入属性,逐字段比对(形状、颜色、旋转、数量) |
-| ca_forward | 逐单元格比对模拟结果 |
-| ca_inverse | 规则表逐条目精确匹配 |
-| logic_grid | 拉丁方合法性 + 所有约束满足 |
-| graph_coloring | 相邻节点无同色 + 恰好使用 k 种颜色 |
-| graph_isomorphism | 解析答案标签(isomorphic / not isomorphic) |
-| unknot | 解析答案标签(unknot / knot) |
-| ortho_projection | SVG 字符串精确匹配 |
-| iso_reconstruction | SVG 字符串精确匹配 |
+| maze | 检测蓝色路径像素(#2266FF),通过BFS追踪连通分量,验证起点到终点的连通性 |
+| raven | 与参考标准瓦片 PNG 进行 SSIM（结构相似性）比较（阈值 0.997） |
+| ca_forward | 在网格单元中心进行像素采样,逐单元格比对模拟结果 |
+| ca_inverse | 规则表单元格像素采样,逐条目精确匹配 |
+| logic_grid | 单元中心的符号颜色采样,验证拉丁方合法性 + 所有约束满足 |
+| graph_coloring | 在节点中心位置进行像素采样,检查相邻节点无同色 + 恰好使用 k 种颜色 |
+| graph_isomorphism | 绿色 vs 红色像素计数,判断 isomorphic / not isomorphic |
+| unknot | 绿色 vs 红色像素计数,判断 unknot / knot |
+| ortho_projection | 填充/空白单元格像素采样,与参考标准 PNG 比对 |
+| iso_reconstruction | 与参考标准 PNG 进行 SSIM 比较（阈值 0.99999） |
 
 ### 结果输出格式(赛道 1)
 
@@ -340,30 +340,25 @@ tacit generate --task maze --difficulty easy --count 10 --seed 42 --output-dir d
 ```
 
 生成的数据包含:
-- 谜题 SVG(`puzzle_svg`): 不含解答路径的迷宫图像
-- 解答 SVG(`solution_svg`): 包含正确路径的迷宫图像
-- 干扰项 SVG(`distractor_svgs`): 包含错误路径的迷宫图像
+- 谜题 PNG: 不含解答路径的迷宫图像
+- 解答 PNG: 包含正确路径的迷宫图像
+- 干扰项 PNG: 包含错误路径的迷宫图像
 - 元数据: puzzle_id, seed, difficulty 参数, 干扰项违反类型
 
 ### 步骤 2: 模型推理(赛道 1 -- 生成式)
 
-模型接收谜题图像,生成解答 SVG 文件,并按规定的目录结构放置:
+模型接收谜题图像,生成解答 PNG 文件,并按规定的目录结构放置:
 
 ```
 model_output/
 └── maze/
     └── easy/
-        ├── maze_easy_0042.svg
-        ├── maze_easy_0043.svg
+        ├── maze_easy_0042.png
+        ├── maze_easy_0043.png
         └── ...
 ```
 
-模型生成的 SVG 文件需要嵌入路径数据。对于迷宫任务,路径以隐藏文本元素编码:
-```xml
-<text visibility="hidden" id="maze-path">0,1,1;0,1,2;0,2,2;...</text>
-```
-
-格式为 `layer,row,col` 的分号分隔序列。
+模型生成的 PNG 图像需要在视觉上呈现解答。对于迷宫任务,解答 PNG 应显示以蓝色（#2266FF）绘制的路径叠加在迷宫网格上。
 
 ### 步骤 3: 运行评估(赛道 1)
 
@@ -372,8 +367,8 @@ tacit evaluate --track generative --model-output ./model_output --tasks maze --o
 ```
 
 评估系统执行以下操作:
-1. 从模型输出目录读取候选 SVG
-2. 结构解析器提取路径数据
+1. 从模型输出目录读取候选 PNG
+2. 基于CV的视觉解析器分析 PNG 图像,检测蓝色路径像素并通过BFS追踪连通分量
 3. 调用 `MazeGenerator.verify()` 进行验证:
    - 检查路径起点是否为迷宫入口
    - 检查路径终点是否为迷宫出口

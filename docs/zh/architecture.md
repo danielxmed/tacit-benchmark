@@ -102,7 +102,7 @@ class PuzzleInstance:
 @runtime_checkable
 class GeneratorProtocol(Protocol):
     def generate(self, difficulty: DifficultyParams, seed: int) -> PuzzleInstance: ...
-    def verify(self, puzzle: PuzzleInstance, candidate_svg: str) -> VerificationResult: ...
+    def verify(self, puzzle: PuzzleInstance, candidate_png: bytes) -> VerificationResult: ...
     def difficulty_axes(self) -> list[DifficultyRange]: ...
 ```
 
@@ -127,7 +127,7 @@ class BaseGenerator(ABC):
     @abstractmethod def _generate_solution_svg(self, puzzle_data, solution_data) -> str
     @abstractmethod def _generate_distractor(self, puzzle_data, solution_data, violation_type, rng) -> tuple[str, str]
     @abstractmethod def _available_violations(self) -> list[str]
-    @abstractmethod def verify(self, puzzle, candidate_svg) -> VerificationResult
+    @abstractmethod def verify(self, puzzle, candidate_png) -> VerificationResult
     @abstractmethod def difficulty_axes(self) -> list[DifficultyRange]
 ```
 
@@ -246,7 +246,7 @@ STYLE = {
 ```python
 class BaseVerifier(ABC):
     @abstractmethod
-    def verify(self, puzzle: PuzzleInstance, candidate_svg: str) -> VerificationResult: ...
+    def verify(self, puzzle: PuzzleInstance, candidate_png: bytes) -> VerificationResult: ...
     @abstractmethod
     def extract_structure(self, svg_string: str) -> Any: ...
 ```
@@ -256,32 +256,34 @@ class BaseVerifier(ABC):
 赛道 1 的验证流程:
 
 ```
-候选 SVG --> 结构解析器 (extract_structure) --> 语义表示 --> verify() --> VerificationResult
+候选 PNG --> 基于CV的视觉解析器 --> 语义表示 --> verify() --> VerificationResult
 ```
 
 每个生成器实现自己的 `verify()` 方法,验证逻辑完全由任务领域决定:
 
 | 验证类别 | 任务 | 方法 |
 |---------|------|------|
-| 路径验证 | maze | 连通性检查(起点、终点、无穿墙、相邻性) |
-| 属性匹配 | raven | 嵌入数据属性逐字段比对 |
-| 网格比对 | ca_forward | 逐单元格状态比较 |
-| 规则匹配 | ca_inverse | 规则表逐条目精确匹配 |
-| 约束满足 | logic_grid | 拉丁方合法性 + 约束检查 |
-| 图着色验证 | graph_coloring | 无相邻同色 + 精确 k 色 |
-| 标签解析 | graph_isomorphism, unknot | SVG 标记/文本提取 |
-| 字符串匹配 | ortho_projection, iso_reconstruction | SVG 完全一致 |
+| BFS路径追踪 | maze | 检测蓝色路径像素,BFS追踪连通分量,验证连通性 |
+| SSIM比较 | raven | 与参考标准瓦片 PNG 进行 SSIM 比较（阈值 0.997） |
+| 像素采样 | ca_forward | 网格单元中心像素采样,逐单元格状态比较 |
+| 像素采样 | ca_inverse | 规则表单元格像素采样,逐条目精确匹配 |
+| 颜色采样 | logic_grid | 单元中心符号颜色采样,拉丁方合法性 + 约束检查 |
+| 节点采样 | graph_coloring | 节点中心像素采样,无相邻同色 + 精确 k 色 |
+| 颜色计数 | graph_isomorphism, unknot | 绿色 vs 红色像素计数 |
+| 像素采样/SSIM | ortho_projection, iso_reconstruction | 填充/空白单元格采样或 SSIM 比较 |
 
-### 结构解析器 (`tacit/core/parsers/`)
+### 视觉解析器 (`tacit/core/cv_utils.py`)
 
-任务专用的 SVG 解析模块,负责从 SVG 中提取语义结构:
+基于CV的视觉解析模块,负责从 PNG 图像中提取语义结构:
 
-| 解析器 | 文件 | 功能 |
-|--------|------|------|
-| `MazeParser` | `maze_parser.py` | 提取隐藏路径数据 |
-| `KnotParser` | `knot_parser.py` | 提取答案标签 |
-| `GraphColoringParser` | `graph_parser.py` | 提取节点颜色映射 |
-| `RavenParser` | `raven_parser.py` | 提取图块属性注释 |
+| 解析方法 | 适用任务 | 功能 |
+|---------|---------|------|
+| BFS路径追踪 | maze | 检测蓝色路径像素,追踪连通分量 |
+| SSIM比较 | raven, iso_reconstruction | 结构相似性比较 |
+| 像素采样 | ca_forward, ca_inverse, ortho_projection | 网格/规则表单元格颜色采样 |
+| 颜色计数 | graph_isomorphism, unknot | 绿色vs红色像素计数 |
+| 节点采样 | graph_coloring | 节点中心位置颜色采样 |
+| 颜色采样 | logic_grid | 单元中心符号颜色采样 |
 
 ---
 
@@ -338,11 +340,11 @@ class EvaluationHarness:
 def evaluate_generative(
     generator: BaseGenerator,
     puzzle: PuzzleInstance,
-    candidate_svg: str,
+    candidate_png: bytes,
 ) -> VerificationResult
 ```
 
-将候选 SVG 传递给任务特定生成器的 `verify()` 方法。
+将候选 PNG 传递给任务特定生成器的 `verify()` 方法。
 
 #### Track 2 评估 (`track2.py`)
 
@@ -565,9 +567,10 @@ tacit_benchmark_0.1.0/
 │   │   ├── __init__.py
 │   │   ├── types.py               # 核心数据类型
 │   │   ├── renderer.py            # SVG/PNG 渲染抽象
+│   │   ├── cv_utils.py            # 计算机视觉工具（像素采样、颜色检测、SSIM）
 │   │   ├── verifier.py            # 验证器基类
 │   │   ├── distractor.py          # 干扰项框架
-│   │   └── parsers/               # SVG 结构解析器
+│   │   └── parsers/               # 结构解析器（兼容层）
 │   │       ├── __init__.py
 │   │       ├── base.py
 │   │       ├── maze_parser.py
@@ -626,6 +629,8 @@ tacit_benchmark_0.1.0/
 | svgwrite | >= 1.4 | SVG 生成 |
 | cairosvg | >= 2.7 | SVG 到 PNG 光栅化 |
 | Pillow | >= 10.0 | 图像处理 |
+| opencv-python | >= 4.8 | 计算机视觉(像素采样、颜色检测) |
+| scikit-image | >= 0.21 | SSIM（结构相似性）比较 |
 | networkx | >= 3.1 | 图算法(着色、同构、连通性) |
 | trimesh | >= 4.0 | 三维几何(体素操作) |
 | numpy-stl | >= 3.0 | STL 格式支持 |
@@ -648,7 +653,7 @@ tacit_benchmark_0.1.0/
 | 决策 | 选择 | 理由 |
 |------|------|------|
 | 语言依赖性 | 最小化(仅符号/变量) | 测试视觉推理而非语言理解 |
-| 验证方式 | 确定性、程序化 | 无歧义,完全可重现 |
+| 验证方式 | 基于CV的确定性验证 | 无歧义,完全可重现,从 PNG 图像中提取结构 |
 | 难度体系 | 按任务类型自适应 | 尊重不同领域中"困难"的不同含义 |
 | 评估赛道 | 双赛道(生成+判别) | 扩大模型覆盖范围,跨赛道差距本身为研究信号 |
 | 干扰项设计 | 近似正确、单约束违反 | 防止赛道 2 退化为简单模式匹配 |

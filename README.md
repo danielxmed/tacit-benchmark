@@ -49,10 +49,12 @@ TACIT evaluates models along two complementary tracks:
 ### Track 1 -- Generative
 
 - **Input:** puzzle image
-- **Output:** model produces a solution image
-- **Evaluation:** programmatic structural verification (not pixel matching)
+- **Output:** model produces a solution PNG image
+- **Evaluation:** CV-based visual verification (OpenCV + scikit-image), not pixel matching
 - **Target:** image-to-image models, strong multimodal generative models
-- **Pipeline:** model output --> structural parser --> `generator.verify()` --> pass/fail
+- **Pipeline:** model PNG output --> CV-based visual parser --> `generator.verify()` --> pass/fail
+
+> **Note:** SVG remains the source format for puzzle generation, but Track 1 verification operates on PNG images using computer vision techniques (pixel sampling, color counting, SSIM, BFS path detection) rather than SVG metadata parsing.
 
 ### Track 2 -- Discriminative
 

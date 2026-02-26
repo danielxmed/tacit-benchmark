@@ -1,6 +1,7 @@
 # tests/generators/test_graph_coloring.py
 """Tests for the Planar Graph k-Coloring generator."""
 import pytest
+from tacit.core.renderer import svg_string_to_png
 from tacit.core.types import DifficultyParams
 
 
@@ -25,14 +26,14 @@ class TestGraphColoringGeneration:
     def test_solution_verifies(self, coloring_gen):
         dp = DifficultyParams(level="easy", params={"nodes": 6, "edge_density": 0.3, "k": 4})
         puzzle = coloring_gen.generate(dp, seed=42)
-        result = coloring_gen.verify(puzzle, puzzle.solution_svg)
+        result = coloring_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
 
     def test_distractors_fail(self, coloring_gen):
         dp = DifficultyParams(level="easy", params={"nodes": 6, "edge_density": 0.3, "k": 4})
         puzzle = coloring_gen.generate(dp, seed=42, num_distractors=4)
         for svg in puzzle.distractor_svgs:
-            result = coloring_gen.verify(puzzle, svg)
+            result = coloring_gen.verify(puzzle, svg_string_to_png(svg))
             assert not result.passed
 
     def test_generated_graph_is_planar(self, coloring_gen):
@@ -40,14 +41,14 @@ class TestGraphColoringGeneration:
         dp = DifficultyParams(level="hard", params={"nodes": 20, "edge_density": 0.5, "k": 3})
         puzzle = coloring_gen.generate(dp, seed=42)
         # Planarity is guaranteed by the generation algorithm
-        result = coloring_gen.verify(puzzle, puzzle.solution_svg)
+        result = coloring_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
 
     def test_chromatic_difficulty(self, coloring_gen):
         """Hard: k close to chromatic number makes it genuinely hard."""
         dp = DifficultyParams(level="hard", params={"nodes": 12, "edge_density": 0.5, "k": 3})
         puzzle = coloring_gen.generate(dp, seed=42)
-        result = coloring_gen.verify(puzzle, puzzle.solution_svg)
+        result = coloring_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
 
 
@@ -56,7 +57,7 @@ class TestGraphColoringVerification:
         """Solution must use exactly k colors."""
         dp = DifficultyParams(level="easy", params={"nodes": 8, "edge_density": 0.3, "k": 4})
         puzzle = coloring_gen.generate(dp, seed=42)
-        result = coloring_gen.verify(puzzle, puzzle.solution_svg)
+        result = coloring_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
         assert result.details.get("colors_used") == 4
 
@@ -64,7 +65,7 @@ class TestGraphColoringVerification:
         """No two adjacent nodes should have the same color in solution."""
         dp = DifficultyParams(level="medium", params={"nodes": 10, "edge_density": 0.4, "k": 4})
         puzzle = coloring_gen.generate(dp, seed=99)
-        result = coloring_gen.verify(puzzle, puzzle.solution_svg)
+        result = coloring_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
         assert result.details.get("adjacent_conflicts") == 0
 
@@ -85,7 +86,7 @@ class TestGraphColoringDistractors:
         # Find an adjacent_conflict distractor
         for svg, label in zip(puzzle.distractor_svgs, puzzle.distractor_violations):
             if label == "adjacent_conflict":
-                result = coloring_gen.verify(puzzle, svg)
+                result = coloring_gen.verify(puzzle, svg_string_to_png(svg))
                 assert not result.passed
                 break
 

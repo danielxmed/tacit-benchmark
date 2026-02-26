@@ -812,74 +812,115 @@ class LogicGridGenerator(BaseGenerator):
         return grid
 
     def verify(
-        self, puzzle: PuzzleInstance, candidate_svg: str
+        self, puzzle: PuzzleInstance, candidate_png: bytes
     ) -> VerificationResult:
-        """Verify a candidate solution against the puzzle constraints.
+        """Verify candidate PNG shows a valid completed logic grid."""
+        from tacit.core.cv_utils import (
+            color_distance,
+            hex_to_rgb,
+            png_to_numpy,
+        )
 
-        Extracts the grid from the candidate SVG and checks:
-        1. Valid Latin square (unique symbols per row and column)
-        2. All constraints are satisfied
-        """
-        n = puzzle.difficulty.params.get("grid_size", 4)
+        solution_grid = puzzle.metadata.get("solution_grid")
+        constraints = puzzle.metadata.get("constraints")
+        symbol_colors = puzzle.metadata.get("symbol_colors")
 
-        # Extract grid from candidate SVG
-        candidate_grid = self._extract_grid_from_svg(candidate_svg, n)
-
-        if candidate_grid is None:
+        if solution_grid is None or constraints is None or symbol_colors is None:
             return VerificationResult(
-                passed=False,
-                reason="Could not parse grid from SVG",
+                passed=False, reason="Missing grid metadata."
             )
 
-        # Extract expected solution grid from the puzzle's solution SVG
-        expected_grid = self._extract_grid_from_svg(puzzle.solution_svg, n)
+        n = len(solution_grid)
+        img = png_to_numpy(candidate_png)
 
-        if expected_grid is None:
-            return VerificationResult(
-                passed=False,
-                reason="Could not parse expected solution from SVG",
-            )
+        # Build color -> symbol value map
+        color_to_val: dict[int, tuple[int, int, int]] = {}
+        for val, hex_color in symbol_colors.items():
+            val_int = int(val) if isinstance(val, str) else val
+            color_to_val[val_int] = hex_to_rgb(hex_color)
 
-        # Check if grids match (symbol indices should match)
-        if candidate_grid == expected_grid:
-            return VerificationResult(
-                passed=True,
-                reason="Solution matches expected grid",
-            )
+        cell_size = 60
+        margin = 80
+        bg_rgb = (250, 250, 250)  # #FAFAFA cell background
+        scan_radius = 15  # scan a 31x31 region around cell center
 
-        # If grids don't match exactly, check if candidate satisfies all constraints
-        # First check Latin square property
+        # Extract grid by finding dominant non-background color in each cell
+        candidate_grid: list[list[int]] = []
+        for r in range(n):
+            row: list[int] = []
+            for c in range(n):
+                cx = int(margin + c * cell_size + cell_size / 2)
+                cy = int(margin + r * cell_size + cell_size / 2)
+
+                # Accumulate weighted color votes from non-background pixels.
+                # Use inverse-distance weighting so pixels close to a symbol
+                # color contribute more than anti-aliased intermediate pixels.
+                votes: dict[int, float] = {v: 0.0 for v in color_to_val}
+                for dy in range(-scan_radius, scan_radius + 1):
+                    for dx in range(-scan_radius, scan_radius + 1):
+                        py = cy + dy
+                        px = cx + dx
+                        if 0 <= py < img.shape[0] and 0 <= px < img.shape[1]:
+                            pixel = (
+                                int(img[py, px, 0]),
+                                int(img[py, px, 1]),
+                                int(img[py, px, 2]),
+                            )
+                            # Skip background pixels
+                            if color_distance(pixel, bg_rgb) < 30:
+                                continue
+                            # Vote for closest symbol color, weighted
+                            best_val = -1
+                            best_dist = float("inf")
+                            for val, rgb in color_to_val.items():
+                                d = color_distance(pixel, rgb)
+                                if d < best_dist:
+                                    best_dist = d
+                                    best_val = val
+                            if best_dist < 120 and best_val != -1:
+                                # Weight: 1/(1+dist) gives higher weight
+                                # to pixels closer to the symbol color
+                                votes[best_val] += 1.0 / (1.0 + best_dist)
+
+                # Pick symbol with highest weighted votes
+                total_votes = sum(votes.values())
+                if total_votes == 0:
+                    return VerificationResult(
+                        passed=False,
+                        reason=f"Unrecognized symbol color at cell ({r},{c}).",
+                    )
+                best_val = max(votes, key=lambda v: votes[v])
+                row.append(best_val)
+            candidate_grid.append(row)
+
+        # Check exact match against solution
+        if candidate_grid == solution_grid:
+            return VerificationResult(passed=True)
+
+        # Check Latin square property
         for r in range(n):
             if len(set(candidate_grid[r])) != n:
                 return VerificationResult(
                     passed=False,
-                    reason=f"Row {r} has duplicate symbols",
-                    details={"row": r, "values": candidate_grid[r]},
+                    reason=f"Row {r} has duplicate symbols.",
                 )
-
         for c in range(n):
             col_vals = [candidate_grid[r][c] for r in range(n)]
             if len(set(col_vals)) != n:
                 return VerificationResult(
                     passed=False,
-                    reason=f"Column {c} has duplicate symbols",
-                    details={"col": c, "values": col_vals},
+                    reason=f"Column {c} has duplicate symbols.",
                 )
 
-        # Check all constraints from puzzle metadata
-        constraints = puzzle.metadata.get("constraints", [])
-        for i, constraint in enumerate(constraints):
+        # Check constraints
+        for constraint in constraints:
             if not self._check_full_constraint(candidate_grid, constraint):
                 return VerificationResult(
                     passed=False,
-                    reason=f"Constraint {i} ({constraint['type']}) violated",
-                    details={"constraint_index": i, "constraint": constraint},
+                    reason=f"Constraint violated: {constraint.get('type', 'unknown')}",
                 )
 
-        return VerificationResult(
-            passed=True,
-            reason="All constraints satisfied",
-        )
+        return VerificationResult(passed=True)
 
     def _available_violations(self) -> list[str]:
         """List the violation types this task supports."""

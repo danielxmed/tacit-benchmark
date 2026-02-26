@@ -120,9 +120,9 @@ class BaseGenerator(ABC):
 
     @abstractmethod
     def verify(
-        self, puzzle: PuzzleInstance, candidate_svg: str
+        self, puzzle: PuzzleInstance, candidate_png: bytes
     ) -> VerificationResult:
-        """Verify a candidate solution."""
+        """Verify a candidate solution (PNG image bytes)."""
         ...
 
     @abstractmethod

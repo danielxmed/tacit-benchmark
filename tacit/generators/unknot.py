@@ -372,14 +372,22 @@ def _render_answer_svg(is_unknot: bool, *, canvas: float = 200.0) -> str:
     )
 
 
-def _extract_answer_from_svg(svg_string: str) -> str | None:
-    """Extract 'unknot' or 'knot' label from an answer SVG."""
-    lower = svg_string.lower()
-    # Look for the text content between >label<
-    if ">unknot<" in lower:
-        return "unknot"
-    if ">knot<" in lower:
-        return "knot"
+def _parse_answer_from_png(png_bytes: bytes) -> bool | None:
+    """Detect green (unknot) vs red (knot) from PNG badge.
+
+    Badge colors: #4CAF50 (unknot/green), #F44336 (knot/red).
+    """
+    from tacit.core.cv_utils import count_color_pixels, hex_to_rgb, png_to_numpy
+
+    img = png_to_numpy(png_bytes)
+    green_count = count_color_pixels(img, hex_to_rgb("#4CAF50"), threshold=60)
+    red_count = count_color_pixels(img, hex_to_rgb("#F44336"), threshold=60)
+
+    min_pixels = 50
+    if green_count > red_count and green_count > min_pixels:
+        return True
+    if red_count > green_count and red_count > min_pixels:
+        return False
     return None
 
 
@@ -443,23 +451,30 @@ class UnknotGenerator(BaseGenerator):
         return ["opposite_answer"]
 
     def verify(
-        self, puzzle: PuzzleInstance, candidate_svg: str
+        self, puzzle: PuzzleInstance, candidate_png: bytes
     ) -> VerificationResult:
-        expected_unknot: bool = puzzle.metadata.get("is_unknot", False)
-        expected_label = "unknot" if expected_unknot else "knot"
-
-        extracted = _extract_answer_from_svg(candidate_svg)
-        if extracted is None:
+        """Verify by detecting green (unknot) vs red (knot) indicator in PNG."""
+        expected_unknot = puzzle.metadata.get("is_unknot")
+        if expected_unknot is None:
             return VerificationResult(
                 passed=False,
-                reason="Could not extract answer label from candidate SVG",
+                reason="Missing is_unknot in puzzle metadata.",
             )
 
-        if extracted == expected_label:
-            return VerificationResult(passed=True, reason="Correct classification")
+        candidate_is_unknot = _parse_answer_from_png(candidate_png)
+        if candidate_is_unknot is None:
+            return VerificationResult(
+                passed=False,
+                reason="Could not detect answer indicator in candidate PNG.",
+            )
+
+        if candidate_is_unknot == expected_unknot:
+            return VerificationResult(passed=True, reason="Correct answer.")
+        expected_label = "unknot" if expected_unknot else "knot"
+        given_label = "unknot" if candidate_is_unknot else "knot"
         return VerificationResult(
             passed=False,
-            reason=f"Expected '{expected_label}', got '{extracted}'",
+            reason=f"Expected {expected_label}, got {given_label}.",
         )
 
     def difficulty_axes(self) -> list[DifficultyRange]:

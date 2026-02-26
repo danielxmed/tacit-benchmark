@@ -21,6 +21,7 @@ from tacit.generators.base import BaseGenerator
 from tacit.generators._ca_common import (
     generate_initial_grid,
     generate_rule,
+    parse_rule_from_png,
     parse_rule_from_svg,
     render_inverse_puzzle_svg,
     render_rule_table_svg,
@@ -192,44 +193,34 @@ class CAInverseGenerator(BaseGenerator):
     # ------------------------------------------------------------------
 
     def verify(
-        self, puzzle: PuzzleInstance, candidate_svg: str
+        self, puzzle: PuzzleInstance, candidate_png: bytes
     ) -> VerificationResult:
-        """Verify by parsing candidate rule and comparing to expected rule.
+        """Verify candidate PNG shows the correct rule table."""
+        # Regenerate expected rule
+        rng = np.random.default_rng(puzzle.seed)
+        _puzzle_data, solution_data = self._generate_puzzle(puzzle.difficulty, rng)
+        expected_rule = solution_data["rule"]
 
-        The rule table must match exactly — even if a different rule happens
-        to produce the same output for a particular initial grid, it is not
-        the correct answer because the task asks to infer THE rule, not just
-        any functionally equivalent rule for a single input.
-        """
         rule_space = puzzle.difficulty.params.get("rule_space", 4)
         num_states = max(2, min(rule_space, 8))
 
-        # Parse the candidate rule from SVG
-        candidate_rule = parse_rule_from_svg(candidate_svg, num_states)
+        # Parse candidate PNG — cell_size=16 matches render_rule_table_svg default
+        candidate_rule = parse_rule_from_png(candidate_png, num_states, cell_size=16)
         if candidate_rule is None:
             return VerificationResult(
                 passed=False,
-                reason="Could not parse rule table from candidate SVG",
+                reason="Could not parse rule table from candidate PNG.",
             )
 
-        # Parse the expected rule from solution SVG
-        expected_rule = parse_rule_from_svg(puzzle.solution_svg, num_states)
-        if expected_rule is None:
-            return VerificationResult(
-                passed=False,
-                reason="Could not parse rule table from solution SVG",
-            )
-
-        # Strict rule comparison — every entry must match
         if np.array_equal(candidate_rule, expected_rule):
             return VerificationResult(passed=True)
 
         diff_count = int(np.sum(candidate_rule != expected_rule))
-        total = int(candidate_rule.size)
+        total = expected_rule.size
         return VerificationResult(
             passed=False,
-            reason=f"Rule table differs: {diff_count}/{total} entries wrong",
-            details={"diff_count": diff_count, "total_entries": total},
+            reason=f"Rule mismatch: {diff_count} of {total} entries differ.",
+            details={"diff_count": diff_count},
         )
 
     # ------------------------------------------------------------------

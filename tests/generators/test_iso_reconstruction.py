@@ -3,6 +3,7 @@
 import pytest
 import numpy as np
 from tacit.core.types import DifficultyParams
+from tacit.core.renderer import svg_string_to_png
 
 
 @pytest.fixture
@@ -26,14 +27,14 @@ class TestIsoReconstructionGeneration:
     def test_solution_verifies(self, iso_recon_gen):
         dp = DifficultyParams(level="easy", params={"faces": 6, "ambiguity": 0})
         puzzle = iso_recon_gen.generate(dp, seed=42)
-        result = iso_recon_gen.verify(puzzle, puzzle.solution_svg)
+        result = iso_recon_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
 
     def test_distractors_fail(self, iso_recon_gen):
         dp = DifficultyParams(level="easy", params={"faces": 6, "ambiguity": 0})
         puzzle = iso_recon_gen.generate(dp, seed=42, num_distractors=4)
         for svg in puzzle.distractor_svgs:
-            result = iso_recon_gen.verify(puzzle, svg)
+            result = iso_recon_gen.verify(puzzle, svg_string_to_png(svg))
             assert not result.passed
 
     def test_puzzle_svg_is_valid(self, iso_recon_gen):
@@ -76,7 +77,7 @@ class TestIsoReconstructionVerification:
         """The solution's re-projections must match the input projections."""
         dp = DifficultyParams(level="easy", params={"faces": 6, "ambiguity": 0})
         puzzle = iso_recon_gen.generate(dp, seed=42)
-        result = iso_recon_gen.verify(puzzle, puzzle.solution_svg)
+        result = iso_recon_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
         # Verify details mention projection match
         assert result.reason == "" or "match" in result.reason.lower() or result.passed
@@ -89,7 +90,7 @@ class TestIsoReconstructionMultipleSeeds:
         dp = DifficultyParams(level="easy", params={"faces": 6, "ambiguity": 0})
         for seed in range(5):
             puzzle = iso_recon_gen.generate(dp, seed=seed)
-            result = iso_recon_gen.verify(puzzle, puzzle.solution_svg)
+            result = iso_recon_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
             assert result.passed, f"Iso reconstruction seed={seed} failed verification"
 
 
@@ -106,5 +107,5 @@ class TestIsoReconstructionAmbiguity:
     def test_solution_verifies_with_ambiguity(self, iso_recon_gen):
         dp = DifficultyParams(level="medium", params={"faces": 12, "ambiguity": 1})
         puzzle = iso_recon_gen.generate(dp, seed=42)
-        result = iso_recon_gen.verify(puzzle, puzzle.solution_svg)
+        result = iso_recon_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed

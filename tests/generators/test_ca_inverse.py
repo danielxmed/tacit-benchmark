@@ -2,6 +2,7 @@
 """Tests for cellular automata inverse inference generator."""
 import pytest
 from tacit.core.types import DifficultyParams
+from tacit.core.renderer import svg_string_to_png
 
 
 @pytest.fixture
@@ -25,14 +26,14 @@ class TestCAInverseGeneration:
     def test_solution_verifies(self, ca_inv_gen):
         dp = DifficultyParams(level="easy", params={"grid_size": 8, "rule_space": 4, "steps": 1})
         puzzle = ca_inv_gen.generate(dp, seed=42)
-        result = ca_inv_gen.verify(puzzle, puzzle.solution_svg)
+        result = ca_inv_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
 
     def test_distractors_fail(self, ca_inv_gen):
         dp = DifficultyParams(level="easy", params={"grid_size": 8, "rule_space": 4, "steps": 1})
         puzzle = ca_inv_gen.generate(dp, seed=42, num_distractors=4)
         for svg in puzzle.distractor_svgs:
-            result = ca_inv_gen.verify(puzzle, svg)
+            result = ca_inv_gen.verify(puzzle, svg_string_to_png(svg))
             assert not result.passed
 
     def test_inferred_rule_reproduces_output(self, ca_inv_gen):
@@ -40,7 +41,7 @@ class TestCAInverseGeneration:
         dp = DifficultyParams(level="easy", params={"grid_size": 8, "rule_space": 4, "steps": 1})
         puzzle = ca_inv_gen.generate(dp, seed=42)
         # The verification itself tests this property
-        result = ca_inv_gen.verify(puzzle, puzzle.solution_svg)
+        result = ca_inv_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
 
 

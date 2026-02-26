@@ -611,3 +611,101 @@ def parse_rule_from_svg(
                 rule[row, col] = color_map[color_key]
 
     return rule
+
+
+# ---------------------------------------------------------------------------
+# PNG parsing — extract grid/rule by sampling pixel colors at cell centers
+# ---------------------------------------------------------------------------
+
+
+def _build_state_palette() -> dict[str, int]:
+    """Build hex_color -> state_index palette from STYLE colors."""
+    palette: dict[str, int] = {"#FFFFFF": 0}
+    for i, color in enumerate(STYLE["colors"]):
+        palette[color.upper()] = i + 1
+    return palette
+
+
+def parse_grid_from_png(
+    png_bytes: bytes,
+    grid_size: int,
+    cell_size: int = CELL_SIZE,
+    padding: int = GRID_PADDING,
+    title_offset: int = LABEL_HEIGHT,
+) -> NDArray[np.int32] | None:
+    """Extract a grid from PNG by sampling cell-center colors.
+
+    Assumes the PNG was rasterized at the SVG's natural viewport size
+    (1:1 pixel mapping with rendering coordinates).
+    """
+    from tacit.core.cv_utils import (
+        find_closest_palette_color,
+        png_to_numpy,
+        sample_color,
+    )
+
+    img = png_to_numpy(png_bytes)
+    palette = _build_state_palette()
+    grid = np.zeros((grid_size, grid_size), dtype=np.int32)
+
+    for r in range(grid_size):
+        for c in range(grid_size):
+            cx = int(padding + c * cell_size + cell_size / 2)
+            cy = int(padding + title_offset + r * cell_size + cell_size / 2)
+            if cy >= img.shape[0] or cx >= img.shape[1]:
+                return None
+            pixel = sample_color(img, cx, cy)
+            state = find_closest_palette_color(pixel, palette)
+            if state is None:
+                return None
+            grid[r, c] = state
+
+    return grid
+
+
+def parse_rule_from_png(
+    png_bytes: bytes,
+    num_states: int,
+    cell_size: int = 12,
+    row_header_w: int = 40,
+    padding: int = GRID_PADDING,
+    title_offset: int = LABEL_HEIGHT,
+    header_h: int = 30,
+) -> NDArray[np.int32] | None:
+    """Extract a rule table from PNG by sampling cell-center colors.
+
+    Layout mirrors render_rule_table_svg():
+    - Title at top
+    - Column headers
+    - Row headers on left
+    - Grid of colored cells
+    """
+    from tacit.core.cv_utils import (
+        find_closest_palette_color,
+        png_to_numpy,
+        sample_color,
+    )
+
+    img = png_to_numpy(png_bytes)
+    palette = _build_state_palette()
+    max_ns = max_neighbor_sum(num_states)
+    expected_cols = max_ns + 1
+
+    rule = np.zeros((num_states, expected_cols), dtype=np.int32)
+
+    base_x = padding + row_header_w
+    base_y = padding + title_offset + header_h
+
+    for i in range(num_states):
+        for j in range(expected_cols):
+            cx = int(base_x + j * cell_size + cell_size / 2)
+            cy = int(base_y + i * cell_size + cell_size / 2)
+            if cy >= img.shape[0] or cx >= img.shape[1]:
+                return None
+            pixel = sample_color(img, cx, cy)
+            state = find_closest_palette_color(pixel, palette)
+            if state is None:
+                return None
+            rule[i, j] = state
+
+    return rule

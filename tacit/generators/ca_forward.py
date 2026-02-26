@@ -21,7 +21,6 @@ from tacit.generators._ca_common import (
     generate_initial_grid,
     generate_rule,
     grid_to_svg,
-    parse_grid_from_svg,
     render_forward_puzzle_svg,
     simulate,
 )
@@ -179,37 +178,33 @@ class CAForwardGenerator(BaseGenerator):
     # ------------------------------------------------------------------
 
     def verify(
-        self, puzzle: PuzzleInstance, candidate_svg: str
+        self, puzzle: PuzzleInstance, candidate_png: bytes
     ) -> VerificationResult:
-        """Verify by parsing the candidate grid and comparing cell-by-cell."""
-        grid_size = puzzle.difficulty.params.get("grid_size", 8)
-        candidate_grid = parse_grid_from_svg(candidate_svg, grid_size)
+        """Verify candidate PNG shows the correct grid at state T+k."""
+        # Regenerate expected solution
+        rng = np.random.default_rng(puzzle.seed)
+        puzzle_data, solution_data = self._generate_puzzle(puzzle.difficulty, rng)
+        expected_grid = solution_data["final_grid"]
+        grid_size = expected_grid.shape[0]
 
+        # Parse candidate PNG
+        from tacit.generators._ca_common import parse_grid_from_png
+
+        candidate_grid = parse_grid_from_png(candidate_png, grid_size)
         if candidate_grid is None:
             return VerificationResult(
                 passed=False,
-                reason="Could not parse grid from candidate SVG",
+                reason="Could not parse grid from candidate PNG.",
             )
 
-        # Re-derive the expected solution from the puzzle metadata
-        expected_grid = parse_grid_from_svg(puzzle.solution_svg, grid_size)
-
-        if expected_grid is None:
-            return VerificationResult(
-                passed=False,
-                reason="Could not parse grid from solution SVG",
-            )
-
-        match = np.array_equal(candidate_grid, expected_grid)
-        if match:
+        if np.array_equal(candidate_grid, expected_grid):
             return VerificationResult(passed=True)
 
         diff_count = int(np.sum(candidate_grid != expected_grid))
-        total = int(candidate_grid.size)
         return VerificationResult(
             passed=False,
-            reason=f"{diff_count}/{total} cells differ",
-            details={"diff_count": diff_count, "total_cells": total},
+            reason=f"Grid mismatch: {diff_count} of {grid_size * grid_size} cells differ.",
+            details={"diff_count": diff_count},
         )
 
     # ------------------------------------------------------------------

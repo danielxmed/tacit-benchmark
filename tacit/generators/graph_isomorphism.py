@@ -220,9 +220,9 @@ class GraphIsomorphismGenerator(BaseGenerator):
     # ------------------------------------------------------------------
 
     def verify(
-        self, puzzle: PuzzleInstance, candidate_svg: str
+        self, puzzle: PuzzleInstance, candidate_png: bytes
     ) -> VerificationResult:
-        """Verify by checking if the candidate matches the solution indicator."""
+        """Verify by detecting green (isomorphic) vs red (not) indicator in PNG."""
         expected_iso = puzzle.metadata.get("is_isomorphic")
         if expected_iso is None:
             return VerificationResult(
@@ -230,23 +230,21 @@ class GraphIsomorphismGenerator(BaseGenerator):
                 reason="Missing is_isomorphic in puzzle metadata.",
             )
 
-        # Parse the candidate SVG to determine which answer it represents.
-        candidate_is_iso = _parse_answer_svg(candidate_svg)
+        candidate_is_iso = _parse_answer_from_png(candidate_png)
         if candidate_is_iso is None:
             return VerificationResult(
                 passed=False,
-                reason="Could not parse answer from candidate SVG.",
+                reason="Could not detect answer indicator in candidate PNG.",
             )
 
         if candidate_is_iso == expected_iso:
             return VerificationResult(passed=True, reason="Correct answer.")
-        else:
-            expected_label = "isomorphic" if expected_iso else "not isomorphic"
-            given_label = "isomorphic" if candidate_is_iso else "not isomorphic"
-            return VerificationResult(
-                passed=False,
-                reason=f"Expected {expected_label}, got {given_label}.",
-            )
+        expected_label = "isomorphic" if expected_iso else "not isomorphic"
+        given_label = "isomorphic" if candidate_is_iso else "not isomorphic"
+        return VerificationResult(
+            passed=False,
+            reason=f"Expected {expected_label}, got {given_label}.",
+        )
 
     # ------------------------------------------------------------------
     # Difficulty axes
@@ -565,18 +563,20 @@ def _render_answer_svg(is_isomorphic: bool) -> str:
     return dwg.tostring()
 
 
-def _parse_answer_svg(svg_string: str) -> bool | None:
-    """Parse an answer SVG to determine whether it indicates isomorphic or not.
+def _parse_answer_from_png(png_bytes: bytes) -> bool | None:
+    """Detect green (isomorphic) vs red (not isomorphic) from PNG.
 
-    Returns True for isomorphic, False for not isomorphic, None if unparseable.
+    Returns True for isomorphic, False for not, None if undetermined.
     """
-    if 'id="answer-isomorphic"' in svg_string:
+    from tacit.core.cv_utils import count_color_pixels, hex_to_rgb, png_to_numpy
+
+    img = png_to_numpy(png_bytes)
+    green_count = count_color_pixels(img, hex_to_rgb(_ISO_CHECK_COLOR), threshold=60)
+    red_count = count_color_pixels(img, hex_to_rgb(_NON_ISO_X_COLOR), threshold=60)
+
+    min_pixels = 50
+    if green_count > red_count and green_count > min_pixels:
         return True
-    if 'id="answer-not-isomorphic"' in svg_string:
-        return False
-    # Fallback: check text content.
-    if "Isomorphic" in svg_string and "Not Isomorphic" not in svg_string:
-        return True
-    if "Not Isomorphic" in svg_string:
+    if red_count > green_count and red_count > min_pixels:
         return False
     return None

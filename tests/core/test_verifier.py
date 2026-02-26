@@ -13,10 +13,10 @@ def test_base_verifier_subclass():
     from tacit.core.types import PuzzleInstance, DifficultyParams, VerificationResult
 
     class DummyVerifier(BaseVerifier):
-        def verify(self, puzzle, candidate_svg):
+        def verify(self, puzzle, candidate_png):
             return VerificationResult(passed=True)
 
-        def extract_structure(self, svg_string):
+        def extract_structure(self, png_bytes):
             return {"dummy": True}
 
     v = DummyVerifier()
@@ -26,5 +26,5 @@ def test_base_verifier_subclass():
         difficulty=dp, puzzle_svg="<svg/>", solution_svg="<svg/>",
         distractor_svgs=[], distractor_violations=[], metadata={},
     )
-    result = v.verify(puzzle, "<svg/>")
+    result = v.verify(puzzle, b"\x89PNG")
     assert result.passed is True

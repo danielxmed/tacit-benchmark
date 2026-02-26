@@ -12,7 +12,6 @@ import networkx as nx
 import numpy as np
 from scipy.spatial import Delaunay
 
-from tacit.core.parsers.graph_parser import GraphColoringParser
 from tacit.core.renderer import (
     STYLE,
     create_canvas,
@@ -28,10 +27,6 @@ from tacit.core.types import (
     VerificationResult,
 )
 from tacit.generators.base import BaseGenerator
-
-# Shared parser instance for verification
-_parser = GraphColoringParser()
-
 
 # --- Internal data types ---
 
@@ -303,14 +298,6 @@ def _render_graph_svg(
     return svg_to_string(canvas)
 
 
-def _parse_node_colors_from_svg(svg_string: str) -> dict[int, str]:
-    """Extract node -> fill color mapping from an SVG string.
-
-    Delegates to GraphColoringParser for the actual parsing logic.
-    """
-    return _parser.parse(svg_string)
-
-
 # --- Generator class ---
 
 
@@ -489,76 +476,156 @@ class GraphColoringGenerator(BaseGenerator):
         return ["adjacent_conflict", "missing_color", "wrong_k"]
 
     def verify(
-        self, puzzle: PuzzleInstance, candidate_svg: str
+        self, puzzle: PuzzleInstance, candidate_png: bytes
     ) -> VerificationResult:
-        """Verify a candidate graph coloring solution.
+        """Verify candidate PNG has valid k-coloring by sampling node fill colors."""
+        from tacit.core.cv_utils import (
+            find_closest_palette_color,
+            png_to_numpy,
+            sample_color,
+        )
 
-        Checks:
-        1. All nodes have a color assigned.
-        2. No two adjacent nodes share the same color.
-        3. Exactly k colors are used.
-        """
-        # Extract expected structure from puzzle metadata
-        # Re-generate puzzle data from same seed to get graph structure
+        # Regenerate puzzle data to get graph structure and node positions
         rng = np.random.default_rng(puzzle.seed)
         puzzle_data, _ = self._generate_puzzle(puzzle.difficulty, rng)
 
-        # Parse colors from candidate SVG
-        node_colors = _parse_node_colors_from_svg(candidate_svg)
+        graph = puzzle_data.graph
+        positions = puzzle_data.positions
+        k = puzzle_data.k
+        nodes = puzzle_data.node_ids
+        edges = puzzle_data.edges
 
-        # Check all nodes are colored
-        missing_nodes = [n for n in puzzle_data.node_ids if n not in node_colors]
-        if missing_nodes:
+        # Scale positions to canvas coordinates (same as rendering)
+        scaled = _scale_positions(positions)
+
+        # Build color palette: hex -> index.
+        # Include non-fill colors (stroke, edges, background, uncolored)
+        # as reject entries (-1) so they never match a fill color.
+        palette: dict[str, int] = {}
+        for i in range(len(STYLE["colors"])):
+            palette[STYLE["colors"][i].upper()] = i
+        for reject_hex in ("#DDDDDD", "#333333", "#999999", "#000000", "#FFFFFF"):
+            palette[reject_hex] = -1
+
+        img = png_to_numpy(candidate_png)
+
+        # Nodes are drawn in node_ids order (sorted ascending), so
+        # higher-index nodes paint over lower-index ones.  We need
+        # occlusion-aware sampling to avoid reading the wrong color.
+        _R = _NODE_RADIUS
+
+        def _is_occluded(
+            sx: float, sy: float, later: list[int],
+        ) -> bool:
+            """Check if (sx, sy) falls inside a later-drawn node's circle."""
+            for ln in later:
+                lx, ly = scaled[ln]
+                if (sx - lx) ** 2 + (sy - ly) ** 2 < _R * _R:
+                    return True
+            return False
+
+        def _sample_node_color(
+            node: int,
+        ) -> int | None:
+            """Sample the fill color of *node* from the rasterized image.
+
+            Uses a multi-strategy approach:
+            1. Try fixed offsets that avoid the text label.
+            2. If all fixed offsets are occluded, generate directed
+               sample points away from occluding nodes.
+            """
+            cx, cy = scaled[node]
+
+            # Nodes drawn later (higher index) may occlude this one.
+            later = [
+                n for n in nodes
+                if n > node
+                and (scaled[n][0] - cx) ** 2 + (scaled[n][1] - cy) ** 2
+                < (3 * _R) ** 2
+            ]
+
+            # Strategy 1: fixed candidate offsets
+            offsets = [
+                (5, -_R // 2), (-5, -_R // 2),
+                (5, _R // 2 + 3), (-5, _R // 2 + 3),
+                (_R // 2, 0), (-_R // 2, 0),
+                (0, -_R // 2), (_R // 2, -3), (-_R // 2, -3),
+            ]
+
+            # Strategy 2: if we have occluding neighbours, add directed
+            # sample points opposite to each occluder (within circle,
+            # avoiding text area y ∈ [cy-2, cy+6]).
+            for ln in later:
+                lx, ly = scaled[ln]
+                dx, dy = cx - lx, cy - ly
+                length = max(1e-6, (dx * dx + dy * dy) ** 0.5)
+                # Point at ~70% radius away from the occluder
+                r_sample = _R * 0.7
+                ox = int(round(dx / length * r_sample))
+                oy = int(round(dy / length * r_sample))
+                # Avoid the text band at center
+                if -2 <= oy <= 6:
+                    oy = -3 if oy < 2 else 7
+                offsets.append((ox, oy))
+
+            votes: dict[int, int] = {}
+            for dx, dy in offsets:
+                sx, sy = cx + dx, cy + dy
+                if _is_occluded(sx, sy, later):
+                    continue
+                pixel = sample_color(img, int(sx), int(sy))
+                idx = find_closest_palette_color(pixel, palette, threshold=50)
+                if idx is not None and idx >= 0:
+                    votes[idx] = votes.get(idx, 0) + 1
+
+            if not votes:
+                return None
+            return max(votes, key=lambda v: votes[v])
+
+        node_colors: dict[int, int] = {}
+        for node in nodes:
+            color_idx = _sample_node_color(node)
+            if color_idx is None:
+                cx, cy = scaled[node]
+                return VerificationResult(
+                    passed=False,
+                    reason=f"Node {node} has unrecognized color at ({cx:.0f}, {cy:.0f}).",
+                )
+            node_colors[node] = color_idx
+
+        # Check all nodes colored
+        if len(node_colors) != len(nodes):
             return VerificationResult(
                 passed=False,
-                reason=f"Missing color for nodes: {missing_nodes}",
-                details={"missing_nodes": missing_nodes},
+                reason=f"Only {len(node_colors)}/{len(nodes)} nodes detected.",
             )
 
-        # Check no adjacent nodes share a color
-        conflicts: list[tuple[int, int]] = []
-        for u, v in puzzle_data.edges:
-            if u in node_colors and v in node_colors:
-                if node_colors[u] == node_colors[v]:
-                    conflicts.append((u, v))
+        # Check adjacency constraint
+        conflicts = 0
+        for u, v in edges:
+            if node_colors.get(u) == node_colors.get(v):
+                conflicts += 1
 
-        # Count unique colors used (excluding background)
-        color_set = set(node_colors.values())
-        color_set.discard("#FFFFFF")
-        color_set.discard("#DDDDDD")
-        colors_used = len(color_set)
-
-        if conflicts:
+        if conflicts > 0:
             return VerificationResult(
                 passed=False,
-                reason=f"Adjacent nodes share color: {conflicts}",
-                details={
-                    "adjacent_conflicts": len(conflicts),
-                    "conflict_pairs": conflicts,
-                    "colors_used": colors_used,
-                },
+                reason=f"{conflicts} adjacent node pair(s) share a color.",
+                details={"adjacent_conflicts": conflicts},
             )
 
         # Check exactly k colors used
-        expected_k = puzzle_data.k
-        if colors_used != expected_k:
+        unique_colors = set(node_colors.values())
+        colors_used = len(unique_colors)
+        if colors_used != k:
             return VerificationResult(
                 passed=False,
-                reason=f"Expected {expected_k} colors, found {colors_used}",
-                details={
-                    "adjacent_conflicts": 0,
-                    "expected_k": expected_k,
-                    "colors_used": colors_used,
-                },
+                reason=f"Expected {k} colors, found {colors_used}.",
+                details={"colors_used": colors_used},
             )
 
         return VerificationResult(
             passed=True,
-            reason="Valid k-coloring",
-            details={
-                "adjacent_conflicts": 0,
-                "colors_used": colors_used,
-            },
+            details={"adjacent_conflicts": 0, "colors_used": colors_used},
         )
 
     def difficulty_axes(self) -> list[DifficultyRange]:

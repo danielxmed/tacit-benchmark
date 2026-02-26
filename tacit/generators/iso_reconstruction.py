@@ -236,22 +236,25 @@ class IsoReconstructionGenerator(BaseGenerator):
         return ["wrong_depth", "missing_face", "extra_volume", "rotated"]
 
     def verify(
-        self, puzzle: PuzzleInstance, candidate_svg: str
+        self, puzzle: PuzzleInstance, candidate_png: bytes
     ) -> VerificationResult:
-        """Verify by comparing candidate SVG to solution SVG.
+        """Verify candidate PNG matches the ground truth isometric view via SSIM."""
+        from tacit.core.cv_utils import compute_ssim
+        from tacit.core.renderer import svg_string_to_png
 
-        The canonical check is SVG string equality. Both are deterministically
-        rendered from the same voxel data.
-        """
-        if candidate_svg == puzzle.solution_svg:
+        ground_truth_png = svg_string_to_png(puzzle.solution_svg)
+        similarity = compute_ssim(ground_truth_png, candidate_png)
+
+        SSIM_THRESHOLD = 0.99999
+        if similarity >= SSIM_THRESHOLD:
             return VerificationResult(
                 passed=True,
-                reason="Isometric view matches ground truth.",
+                details={"ssim": round(similarity, 4)},
             )
-
         return VerificationResult(
             passed=False,
-            reason="Candidate isometric view does not match ground truth.",
+            reason=f"SSIM {similarity:.3f} below threshold {SSIM_THRESHOLD}.",
+            details={"ssim": round(similarity, 4)},
         )
 
     def difficulty_axes(self) -> list[DifficultyRange]:

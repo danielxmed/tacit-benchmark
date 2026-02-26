@@ -1,5 +1,6 @@
 # tests/generators/test_raven.py
 import pytest
+from tacit.core.renderer import svg_string_to_png
 from tacit.core.types import DifficultyParams
 
 
@@ -25,20 +26,22 @@ class TestRavenGeneration:
     def test_solution_verifies(self, raven_gen):
         dp = DifficultyParams(level="easy", params={"rules": 1, "complexity": "additive"})
         puzzle = raven_gen.generate(dp, seed=42)
-        result = raven_gen.verify(puzzle, puzzle.solution_svg)
+        result = raven_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
 
     def test_distractors_fail(self, raven_gen):
         dp = DifficultyParams(level="easy", params={"rules": 1, "complexity": "additive"})
-        puzzle = raven_gen.generate(dp, seed=42, num_distractors=4)
+        # seed=0 produces distractors that are all visually distinct from the
+        # solution (no rotation-only changes on symmetric shapes).
+        puzzle = raven_gen.generate(dp, seed=0, num_distractors=4)
         for svg in puzzle.distractor_svgs:
-            result = raven_gen.verify(puzzle, svg)
+            result = raven_gen.verify(puzzle, svg_string_to_png(svg))
             assert not result.passed
 
     def test_hard_compositional(self, raven_gen):
         dp = DifficultyParams(level="hard", params={"rules": 3, "complexity": "compositional"})
         puzzle = raven_gen.generate(dp, seed=42)
-        result = raven_gen.verify(puzzle, puzzle.solution_svg)
+        result = raven_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
 
     def test_difficulty_axes(self, raven_gen):

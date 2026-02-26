@@ -1,5 +1,6 @@
 # tests/generators/test_unknot.py
 import pytest
+from tacit.core.renderer import svg_string_to_png
 from tacit.core.types import DifficultyParams
 
 
@@ -24,7 +25,7 @@ class TestUnknotGeneration:
     def test_solution_verifies(self, unknot_gen):
         dp = DifficultyParams(level="easy", params={"crossings": 3})
         puzzle = unknot_gen.generate(dp, seed=42)
-        result = unknot_gen.verify(puzzle, puzzle.solution_svg)
+        result = unknot_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
 
     def test_balanced_unknot_knot(self, unknot_gen):
@@ -59,7 +60,7 @@ class TestUnknotGeneration:
         dp = DifficultyParams(level="easy", params={"crossings": 3})
         puzzle = unknot_gen.generate(dp, seed=42, num_distractors=4)
         for svg in puzzle.distractor_svgs:
-            result = unknot_gen.verify(puzzle, svg)
+            result = unknot_gen.verify(puzzle, svg_string_to_png(svg))
             assert not result.passed
 
     def test_difficulty_axes(self, unknot_gen):
@@ -75,7 +76,7 @@ class TestUnknotGeneration:
     def test_higher_crossings(self, unknot_gen):
         dp = DifficultyParams(level="hard", params={"crossings": 7})
         puzzle = unknot_gen.generate(dp, seed=42)
-        result = unknot_gen.verify(puzzle, puzzle.solution_svg)
+        result = unknot_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
 
 
@@ -86,12 +87,12 @@ class TestUnknotSolvability:
         dp = DifficultyParams(level="easy", params={"crossings": 3})
         for seed in range(10):
             puzzle = unknot_gen.generate(dp, seed=seed)
-            result = unknot_gen.verify(puzzle, puzzle.solution_svg)
+            result = unknot_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
             assert result.passed, f"Unknot seed={seed} solution failed verification"
 
     def test_medium_all_verify(self, unknot_gen):
         dp = DifficultyParams(level="medium", params={"crossings": 5})
         for seed in range(10):
             puzzle = unknot_gen.generate(dp, seed=seed)
-            result = unknot_gen.verify(puzzle, puzzle.solution_svg)
+            result = unknot_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
             assert result.passed, f"Unknot seed={seed} solution failed verification"

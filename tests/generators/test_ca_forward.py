@@ -2,6 +2,7 @@
 """Tests for cellular automata forward prediction generator."""
 import pytest
 from tacit.core.types import DifficultyParams
+from tacit.core.renderer import svg_string_to_png
 
 
 @pytest.fixture
@@ -26,20 +27,20 @@ class TestCAForwardGeneration:
     def test_solution_verifies(self, ca_gen):
         dp = DifficultyParams(level="easy", params={"grid_size": 8, "rule_complexity": 2, "steps": 1})
         puzzle = ca_gen.generate(dp, seed=42)
-        result = ca_gen.verify(puzzle, puzzle.solution_svg)
+        result = ca_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
 
     def test_distractors_fail(self, ca_gen):
         dp = DifficultyParams(level="easy", params={"grid_size": 8, "rule_complexity": 2, "steps": 1})
         puzzle = ca_gen.generate(dp, seed=42, num_distractors=4)
         for svg in puzzle.distractor_svgs:
-            result = ca_gen.verify(puzzle, svg)
+            result = ca_gen.verify(puzzle, svg_string_to_png(svg))
             assert not result.passed
 
     def test_multi_step(self, ca_gen):
         dp = DifficultyParams(level="hard", params={"grid_size": 16, "rule_complexity": 6, "steps": 5})
         puzzle = ca_gen.generate(dp, seed=42)
-        result = ca_gen.verify(puzzle, puzzle.solution_svg)
+        result = ca_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
 
 

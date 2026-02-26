@@ -1,5 +1,6 @@
 # tests/generators/test_logic_grid.py
 import pytest
+from tacit.core.renderer import svg_string_to_png
 from tacit.core.types import DifficultyParams
 
 
@@ -24,14 +25,14 @@ class TestLogicGridGeneration:
     def test_solution_verifies(self, logic_gen):
         dp = DifficultyParams(level="easy", params={"grid_size": 4, "constraints": 6, "types": 2})
         puzzle = logic_gen.generate(dp, seed=42)
-        result = logic_gen.verify(puzzle, puzzle.solution_svg)
+        result = logic_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
 
     def test_distractors_fail(self, logic_gen):
         dp = DifficultyParams(level="easy", params={"grid_size": 4, "constraints": 6, "types": 2})
         puzzle = logic_gen.generate(dp, seed=42, num_distractors=4)
         for svg in puzzle.distractor_svgs:
-            result = logic_gen.verify(puzzle, svg)
+            result = logic_gen.verify(puzzle, svg_string_to_png(svg))
             assert not result.passed
 
     def test_unique_solution(self, logic_gen):
@@ -39,7 +40,7 @@ class TestLogicGridGeneration:
         dp = DifficultyParams(level="easy", params={"grid_size": 4, "constraints": 6, "types": 2})
         for seed in range(5):
             puzzle = logic_gen.generate(dp, seed=seed)
-            result = logic_gen.verify(puzzle, puzzle.solution_svg)
+            result = logic_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
             assert result.passed, f"Seed {seed} produced invalid solution"
 
 
@@ -121,5 +122,5 @@ class TestLogicGridDifficulty:
         dp = DifficultyParams(level="medium", params={"grid_size": 5, "constraints": 8, "types": 3})
         puzzle = logic_gen.generate(dp, seed=99)
         assert puzzle.task == "logic_grid"
-        result = logic_gen.verify(puzzle, puzzle.solution_svg)
+        result = logic_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed

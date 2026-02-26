@@ -40,7 +40,7 @@ def test_base_generator_full_subclass():
         def _available_violations(self):
             return ["type_a"]
 
-        def verify(self, puzzle, candidate_svg):
+        def verify(self, puzzle, candidate_png):
             return VerificationResult(passed=True)
 
         def difficulty_axes(self):
@@ -70,7 +70,7 @@ def test_base_generator_generate():
         def _available_violations(self):
             return ["type_a"]
 
-        def verify(self, puzzle, candidate_svg):
+        def verify(self, puzzle, candidate_png):
             return VerificationResult(passed=True)
 
         def difficulty_axes(self):
@@ -109,7 +109,7 @@ def test_base_generator_deterministic():
         def _available_violations(self):
             return ["type_a"]
 
-        def verify(self, puzzle, candidate_svg):
+        def verify(self, puzzle, candidate_png):
             return VerificationResult(passed=True)
 
         def difficulty_axes(self):

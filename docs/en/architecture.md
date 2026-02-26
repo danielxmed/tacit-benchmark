@@ -29,7 +29,7 @@ Every task in TACIT is implemented as a generator that conforms to a common prot
 @runtime_checkable
 class GeneratorProtocol(Protocol):
     def generate(self, difficulty: DifficultyParams, seed: int) -> PuzzleInstance: ...
-    def verify(self, puzzle: PuzzleInstance, candidate_svg: str) -> VerificationResult: ...
+    def verify(self, puzzle: PuzzleInstance, candidate_png: bytes) -> VerificationResult: ...
     def difficulty_axes(self) -> list[DifficultyRange]: ...
 ```
 
@@ -44,7 +44,7 @@ class GeneratorProtocol(Protocol):
 | `_generate_solution_svg(puzzle_data, solution_data)` | Render solution to SVG |
 | `_generate_distractor(puzzle_data, solution_data, violation_type, rng)` | Create one near-miss distractor |
 | `_available_violations()` | List supported violation types |
-| `verify(puzzle, candidate_svg)` | Structural verification of a candidate |
+| `verify(puzzle, candidate_png)` | CV-based verification of a candidate PNG |
 | `difficulty_axes()` | Declare difficulty parameters and ranges |
 
 The `generate()` method uses separate RNG streams for puzzle generation (`seed`) and distractor generation (`seed + 2^31`), ensuring puzzle determinism is independent of distractor count.
@@ -115,12 +115,12 @@ Generators call these primitives rather than using `svgwrite` directly (with the
 ### Rasterization Pipeline
 
 ```
-Generator  -->  SVG Drawing  -->  svg_to_string()  -->  SVG string (source of truth)
+Generator  -->  SVG Drawing  -->  svg_to_string()  -->  SVG string (generation source of truth)
                                           |
-                                  svg_to_png(width) -->  PNG bytes (distribution format)
+                                  svg_to_png(width) -->  PNG bytes (verification + distribution)
 ```
 
-The SVG is the source of truth for verification. PNGs are rasterized at configurable resolutions (default: 256, 512 px) for distribution on HuggingFace.
+SVG remains the source of truth for puzzle generation. However, Track 1 verification operates on PNG images: generators rasterize solutions to PNG internally, and model candidates are submitted as PNG files. PNGs are rasterized at configurable resolutions (default: 256, 512 px) for distribution on HuggingFace.
 
 ---
 
@@ -132,30 +132,33 @@ The verification contract requires each task to implement two capabilities:
 
 ```python
 class BaseVerifier(ABC):
-    def verify(self, puzzle: PuzzleInstance, candidate_svg: str) -> VerificationResult: ...
-    def extract_structure(self, svg_string: str) -> Any: ...
+    def verify(self, puzzle: PuzzleInstance, candidate_png: bytes) -> VerificationResult: ...
+    def extract_structure(self, png_bytes: bytes) -> Any: ...
 ```
 
-In practice, generators implement `verify()` directly as part of `BaseGenerator` rather than through a separate verifier class. The verification approach varies by task:
+In practice, generators implement `verify()` directly as part of `BaseGenerator` rather than through a separate verifier class. All verification operates on PNG images using computer vision (CV) techniques. The verification approach varies by task:
 
 | Strategy | Tasks | How it works |
 |----------|-------|-------------|
-| **Structural parsing** | maze, raven, ca_forward, ca_inverse, logic_grid, graph_coloring | SVG is parsed to extract data (paths, grids, colors, attributes), then checked against constraints |
-| **Label extraction** | graph_isomorphism, unknot | SVG is searched for answer indicators (element IDs, text content) |
-| **Exact SVG match** | ortho_projection, iso_reconstruction | Candidate SVG string must equal the deterministically rendered solution SVG |
+| **Pixel sampling** | maze, ca_forward, ca_inverse, logic_grid, graph_coloring, ortho_projection | PNG pixels are sampled at known positions, colors mapped to structural data, then checked against constraints |
+| **Color counting** | graph_isomorphism, unknot | Green vs red pixel counts determine binary answer |
+| **SSIM comparison** | raven, iso_reconstruction | Structural similarity index between candidate PNG and ground truth PNG |
 
-### SVG Parsers (`tacit/core/parsers/`)
+### Visual Parsers and CV Utilities
 
-Task-specific parsers extract structural data from SVGs:
+Shared CV utilities in `tacit/core/cv_utils.py` provide common primitives for PNG-based verification:
 
-| Parser | Task | Extracts |
-|--------|------|----------|
-| `maze_parser.py` | maze | Path coordinates from hidden text element |
-| `raven_parser.py` | raven | Tile attributes from data-tacit-* comments |
-| `graph_parser.py` | graph_coloring | Node-to-color mapping from circle elements |
-| `knot_parser.py` | unknot | Answer label from text content |
+| Function | Purpose |
+|----------|---------|
+| `png_to_numpy(png_bytes)` | Load PNG bytes into an (H, W, 3) RGB numpy array |
+| `sample_color(img, x, y)` | Sample RGB at pixel coordinates |
+| `find_closest_palette_color(pixel, palette)` | Map pixel RGB to nearest palette entry |
+| `count_color_pixels(img, target_rgb)` | Count pixels within threshold of a target color |
+| `compute_ssim(png1, png2)` | Structural similarity index between two PNG images |
+| `hex_to_rgb(hex_color)` | Convert hex color string to RGB tuple |
+| `color_distance(c1, c2)` | Euclidean distance between two RGB tuples |
 
-The CA tasks and logic grid task have parsing logic inline in their generators or in `_ca_common.py`.
+Legacy SVG parsers remain in `tacit/core/parsers/` but are no longer used by Track 1 verification. The CA tasks have additional CV parsing logic in `_ca_common.py` (`parse_grid_from_png`, `parse_rule_from_png`). Each generator implements its own CV-based extraction logic inline in its `verify()` method.
 
 ---
 
@@ -213,7 +216,7 @@ The evaluation layer is task-agnostic. It orchestrates evaluation across tasks a
 | Module | Purpose |
 |--------|---------|
 | `harness.py` | `EvaluationHarness` class: generator registry, task instantiation, evaluation orchestration |
-| `track1.py` | Generative evaluation: delegates to `generator.verify(puzzle, candidate_svg)` |
+| `track1.py` | Generative evaluation: delegates to `generator.verify(puzzle, candidate_png)` |
 | `track2.py` | Discriminative evaluation: compares `correct_index == selected_index` |
 | `metrics.py` | Scoring functions: `compute_accuracy`, `compute_accuracy_by_difficulty`, `compute_accuracy_by_task` |
 | `report.py` | JSON report generation |
@@ -225,8 +228,8 @@ The evaluation layer is task-agnostic. It orchestrates evaluation across tasks a
 ```
 For each puzzle:
     1. Load puzzle metadata (task, seed, difficulty)
-    2. Load model's SVG from model_output/{task}/{difficulty}/{puzzle_id}.svg
-    3. generator.verify(puzzle, candidate_svg) --> VerificationResult
+    2. Load model's PNG from model_output/{task}/{difficulty}/{puzzle_id}.png
+    3. generator.verify(puzzle, candidate_png) --> VerificationResult
     4. Record passed/failed with reason
 ```
 
@@ -336,6 +339,7 @@ tacit_benchmark_0.1.0/
 │   │   ├── types.py                        # DifficultyParams, PuzzleInstance, VerificationResult, GeneratorProtocol
 │   │   ├── renderer.py                     # SVG/PNG rendering abstraction
 │   │   ├── verifier.py                     # BaseVerifier ABC
+│   │   ├── cv_utils.py                     # CV primitives for PNG-based verification
 │   │   ├── distractor.py                   # BaseDistractorGenerator ABC
 │   │   └── parsers/
 │   │       ├── base.py                     # Parser base
@@ -345,7 +349,7 @@ tacit_benchmark_0.1.0/
 │   │       └── knot_parser.py              # Answer label extraction
 │   ├── generators/
 │   │   ├── base.py                         # BaseGenerator ABC (template method)
-│   │   ├── _ca_common.py                   # CA simulation, rule tables, grid SVG parsing
+│   │   ├── _ca_common.py                   # CA simulation, rule tables, grid/rule PNG parsing
 │   │   ├── _geometry_common.py             # Voxel generation, projection, isometric rendering
 │   │   ├── maze.py                         # Task 1
 │   │   ├── raven.py                        # Task 2

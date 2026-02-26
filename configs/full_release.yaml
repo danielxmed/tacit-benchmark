@@ -1,0 +1,97 @@
+# TACIT Benchmark — Full Release Generation Config
+version: "0.1.0"
+seed: 42
+output_dir: "data"
+resolutions: [256, 512, 1024]
+distractors_per_puzzle: 6
+
+tasks:
+  maze:
+    enabled: true
+    count_per_difficulty: 200
+    difficulties:
+      easy: {grid_size: 8, layers: 1, portals: 0}
+      medium: {grid_size: 16, layers: 2, portals: 2}
+      hard: {grid_size: 32, layers: 3, portals: 5}
+      expert: {grid_size: 64, layers: 4, portals: 8}
+
+  raven:
+    enabled: true
+    count_per_difficulty: 200
+    difficulties:
+      easy: {rules: 1, complexity: "additive"}
+      medium: {rules: 2, complexity: "additive"}
+      hard: {rules: 3, complexity: "compositional"}
+      expert: {rules: 4, complexity: "compositional"}
+
+  ca_forward:
+    enabled: true
+    count_per_difficulty: 200
+    difficulties:
+      easy: {grid_size: 8, rule_complexity: 2, steps: 1}
+      medium: {grid_size: 16, rule_complexity: 4, steps: 3}
+      hard: {grid_size: 32, rule_complexity: 8, steps: 5}
+      expert: {grid_size: 64, rule_complexity: 12, steps: 8}
+
+  ca_inverse:
+    enabled: true
+    count_per_difficulty: 200
+    difficulties:
+      easy: {grid_size: 8, rule_space: 4, steps: 1}
+      medium: {grid_size: 16, rule_space: 8, steps: 2}
+      hard: {grid_size: 32, rule_space: 16, steps: 3}
+      expert: {grid_size: 64, rule_space: 32, steps: 5}
+
+  logic_grid:
+    enabled: true
+    count_per_difficulty: 200
+    difficulties:
+      easy: {grid_size: 4, constraints: 6, types: 2}
+      medium: {grid_size: 5, constraints: 10, types: 3}
+      hard: {grid_size: 6, constraints: 16, types: 4}
+      expert: {grid_size: 8, constraints: 24, types: 5}
+
+  graph_coloring:
+    enabled: true
+    count_per_difficulty: 200
+    difficulties:
+      easy: {nodes: 6, edge_density: 0.3, k: 4}
+      medium: {nodes: 12, edge_density: 0.4, k: 4}
+      hard: {nodes: 20, edge_density: 0.5, k: 3}
+      expert: {nodes: 30, edge_density: 0.6, k: 3}
+
+  graph_isomorphism:
+    enabled: true
+    count_per_difficulty: 200
+    difficulties:
+      easy: {nodes: 5, distortion: 0.3}
+      medium: {nodes: 8, distortion: 0.6}
+      hard: {nodes: 12, distortion: 0.9}
+      expert: {nodes: 16, distortion: 1.0}
+
+  unknot:
+    enabled: true
+    count_per_difficulty: 200
+    difficulties:
+      easy: {crossings: 3}
+      medium: {crossings: 6}
+      hard: {crossings: 10}
+      expert: {crossings: 15}
+
+  ortho_projection:
+    enabled: true
+    count_per_difficulty: 200
+    difficulties:
+      easy: {faces: 6, concavities: 0}
+      medium: {faces: 10, concavities: 1}
+      hard: {faces: 16, concavities: 3}
+      expert: {faces: 24, concavities: 5}
+
+  iso_reconstruction:
+    enabled: true
+    count_per_difficulty: 200
+    difficulties:
+      easy: {faces: 6, ambiguity: 0}
+      medium: {faces: 10, ambiguity: 1}
+      hard: {faces: 16, ambiguity: 2}
+      expert: {faces: 24, ambiguity: 4}

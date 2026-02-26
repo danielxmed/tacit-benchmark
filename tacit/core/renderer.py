@@ -170,3 +170,15 @@ def save_png(canvas: Drawing, path: Path, width: int) -> None:
     """Save SVG canvas as rasterized PNG."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(svg_to_png(canvas, width))
+
+
+def svg_string_to_png(svg_string: str, width: int | None = None) -> bytes:
+    """Rasterize an SVG string to PNG bytes.
+
+    If *width* is None, renders at the SVG's natural viewport size
+    (preserving 1:1 pixel mapping with rendering coordinates).
+    """
+    kwargs: dict = {"bytestring": svg_string.encode("utf-8")}
+    if width is not None:
+        kwargs["output_width"] = width
+    return cairosvg.svg2png(**kwargs)

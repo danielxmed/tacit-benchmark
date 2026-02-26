@@ -36,7 +36,7 @@ For single-layer mazes, there is one grid with no portals. For multi-layer mazes
 
 ### Solution Requirements
 
-The solution SVG must contain a hidden text element `<text id="maze-path">` encoding the path as semicolon-delimited `layer,row,col` triples. The path must form a continuous route from the start cell to the end cell.
+The solution PNG image must show the maze grid with the solution path drawn in blue (#2266FF). The path must form a continuous route from the start cell to the end cell, visible as a connected blue line through passage cells.
 
 ### Difficulty Parameters
 
@@ -56,7 +56,7 @@ hard:   {grid_size: 32, layers: 3, portals: 5}
 
 ### Verification Logic
 
-The verifier (`MazeGenerator.verify()`) performs four structural checks on the extracted path:
+The verifier (`MazeGenerator.verify()`) detects blue path pixels (#2266FF) in the candidate PNG, maps them to grid cells by sampling at cell center positions, and traces the connected component via BFS. It then performs four structural checks:
 
 1. **Start check:** First cell in path equals the designated start position.
 2. **End check:** Last cell in path equals the designated end position.
@@ -91,7 +91,7 @@ Transformation rules govern how attributes change across rows and/or columns. In
 
 ### Solution Requirements
 
-The solution SVG must contain `data-tacit-*` attributes embedded as an HTML comment, specifying all five tile attributes: `shape`, `color`, `size`, `rotation`, and `count`.
+The solution PNG image must render the missing tile with the correct shape, color, size, rotation, and count attributes.
 
 ### Difficulty Parameters
 
@@ -110,9 +110,7 @@ hard:   {rules: 3, complexity: "compositional"}
 
 ### Verification Logic
 
-The verifier (`RavenGenerator.verify()`) extracts tile attributes from both the candidate and expected solution SVGs using regex matching on `data-tacit-*` patterns. It then compares all five attributes. A mismatch in any attribute means the candidate fails.
-
-The `VerificationResult.details` includes a `mismatches` dict showing which attributes differed and their expected vs. actual values.
+The verifier (`RavenGenerator.verify()`) computes the Structural Similarity Index (SSIM) between the candidate PNG and the ground truth tile PNG. A match requires SSIM >= 0.997 (threshold). The `VerificationResult.details` includes the computed SSIM score.
 
 ### Distractor Violation Types
 
@@ -142,7 +140,7 @@ The cellular automaton uses a 2D Moore neighborhood (8 surrounding cells) with w
 
 ### Solution Requirements
 
-The solution SVG must render the final grid ("State T+k") as colored rectangles using the same state-color mapping. The verifier parses the grid by extracting `<rect>` elements and mapping their fill colors back to state values.
+The solution PNG image must render the final grid ("State T+k") as colored cells using the same state-color mapping.
 
 ### Difficulty Parameters
 
@@ -162,7 +160,7 @@ hard:   {grid_size: 32, rule_complexity: 8, steps: 5}
 
 ### Verification Logic
 
-The verifier (`CAForwardGenerator.verify()`) parses both the candidate and solution SVGs into grid arrays by extracting `<rect>` fill colors and mapping them to state values. It then performs cell-by-cell comparison using `numpy.array_equal`. On failure, it reports the number of differing cells out of the total.
+The verifier (`CAForwardGenerator.verify()`) parses the candidate PNG by sampling pixel colors at grid cell centers and mapping them to state values via the known color palette. It then performs cell-by-cell comparison against the expected grid using `numpy.array_equal`. On failure, it reports the number of differing cells out of the total.
 
 ### Distractor Violation Types
 
@@ -189,7 +187,7 @@ This is the inverse of Task 3: given input and output, infer the function.
 
 ### Solution Requirements
 
-The solution SVG must render the rule table as a grid of small colored rectangles. Rows represent current cell states, columns represent neighbor sums, and each cell's color encodes the output state.
+The solution PNG image must render the rule table as a grid of small colored cells. Rows represent current cell states, columns represent neighbor sums, and each cell's color encodes the output state.
 
 ### Difficulty Parameters
 
@@ -209,7 +207,7 @@ hard:   {grid_size: 32, rule_space: 16, steps: 3}
 
 ### Verification Logic
 
-The verifier (`CAInverseGenerator.verify()`) parses the candidate rule table from SVG by extracting small colored rectangles and mapping them to state values. It performs strict entry-by-entry comparison against the expected rule table. The rule must match exactly -- even a functionally equivalent rule that produces the same output for the specific initial grid but differs in entries is rejected, because the task is to infer the exact rule.
+The verifier (`CAInverseGenerator.verify()`) parses the candidate rule table from the PNG by sampling pixel colors at cell centers and mapping them to state values. It performs strict entry-by-entry comparison against the expected rule table. The rule must match exactly -- even a functionally equivalent rule that produces the same output for the specific initial grid but differs in entries is rejected, because the task is to infer the exact rule.
 
 ### Distractor Violation Types
 
@@ -243,7 +241,7 @@ The underlying structure is a Latin square: each symbol appears exactly once per
 
 ### Solution Requirements
 
-The solution SVG renders the completed grid with each cell containing the correct colored symbol. The verifier parses text elements and their positions to reconstruct the grid values.
+The solution PNG image renders the completed grid with each cell containing the correct colored symbol.
 
 ### Difficulty Parameters
 
@@ -265,7 +263,7 @@ The generator ensures that the constraint set uniquely determines the solution b
 
 ### Verification Logic
 
-The verifier (`LogicGridGenerator.verify()`) extracts the grid by parsing symbol text elements from the SVG and mapping them to grid positions. It checks:
+The verifier (`LogicGridGenerator.verify()`) extracts the grid by sampling symbol colors at cell centers in the PNG with inverse-distance weighted voting. Non-background pixels within a scan region around each cell center are matched against known symbol colors to determine which symbol occupies each cell. It checks:
 
 1. **Latin square property:** Each row and each column contains unique symbols.
 2. **Constraint satisfaction:** All constraints from the puzzle metadata are satisfied.
@@ -296,7 +294,7 @@ The puzzle view shows all nodes uncolored (gray). The model must produce a color
 
 ### Solution Requirements
 
-The solution SVG must render the same graph with each node filled using one of k colors from the standard palette. Each node circle must have an `id="node-{id}"` attribute so the parser can map fill colors to node identifiers.
+The solution PNG image must render the same graph with each node filled using one of k colors from the standard palette.
 
 ### Difficulty Parameters
 
@@ -316,7 +314,7 @@ hard:   {nodes: 20, edge_density: 0.5, k: 3}
 
 ### Verification Logic
 
-The verifier (`GraphColoringGenerator.verify()`) regenerates the graph from the puzzle seed to obtain the adjacency structure. It then parses node fill colors from the candidate SVG using the `GraphColoringParser`. Three checks are performed:
+The verifier (`GraphColoringGenerator.verify()`) regenerates the graph from the puzzle seed to obtain the adjacency structure and node positions. It samples pixel colors at each node's center position in the candidate PNG, using occlusion-aware offsets to avoid reading colors from overlapping nodes drawn later in the render order. Three checks are performed:
 
 1. **Completeness:** All nodes have an assigned color (not gray or white).
 2. **Validity:** No two adjacent nodes share the same fill color.
@@ -350,7 +348,7 @@ The task is binary: determine whether the two graphs are isomorphic (structurall
 
 ### Solution Requirements
 
-The solution SVG is a badge-style indicator: a green checkmark with "Isomorphic" text, or a red X with "Not Isomorphic" text. The SVG contains a hidden `<rect>` element with `id="answer-isomorphic"` or `id="answer-not-isomorphic"` for reliable parsing.
+The solution PNG image is a badge-style indicator: a green checkmark with "Isomorphic" text on a green background, or a red X with "Not Isomorphic" text on a red background.
 
 ### Difficulty Parameters
 
@@ -371,7 +369,7 @@ Higher distortion makes the visual comparison harder because node positions beco
 
 ### Verification Logic
 
-The verifier (`GraphIsomorphismGenerator.verify()`) parses the candidate SVG to determine which answer it represents by checking for `id="answer-isomorphic"` or `id="answer-not-isomorphic"`. It falls back to checking text content for "Isomorphic" or "Not Isomorphic." The extracted answer is compared against the ground truth stored in puzzle metadata.
+The verifier (`GraphIsomorphismGenerator.verify()`) determines the answer by counting green vs red pixels in the candidate PNG. A predominance of green pixels indicates "isomorphic"; a predominance of red pixels indicates "not isomorphic." The extracted answer is compared against the ground truth stored in puzzle metadata.
 
 ### Distractor Violation Types
 
@@ -400,7 +398,7 @@ The task is binary: determine whether the diagram represents the unknot (topolog
 
 ### Solution Requirements
 
-The solution SVG is a badge showing either "unknot" (green background) or "knot" (red background) as text within the SVG. The verifier extracts the label by searching for `>unknot<` or `>knot<` in the SVG string.
+The solution PNG image is a badge showing either "unknot" (green background) or "knot" (red background).
 
 ### Difficulty Parameters
 
@@ -420,7 +418,7 @@ More crossings make the puzzle harder because the diagram becomes more tangled a
 
 ### Verification Logic
 
-The verifier (`UnknotGenerator.verify()`) extracts the answer label from the candidate SVG by searching for `>unknot<` or `>knot<` in the string content. It compares the extracted label against the ground truth `is_unknot` flag stored in puzzle metadata.
+The verifier (`UnknotGenerator.verify()`) determines the answer by counting green vs red pixels in the candidate PNG. A predominance of green pixels (#4CAF50) indicates "unknot"; a predominance of red pixels (#F44336) indicates "knot." The extracted answer is compared against the ground truth `is_unknot` flag stored in puzzle metadata.
 
 ### Distractor Violation Types
 
@@ -445,7 +443,7 @@ The model must produce the correct 2D orthographic projection (silhouette) along
 
 ### Solution Requirements
 
-The solution SVG renders the 2D projection as a grid of filled/empty cells. Verification is by exact SVG string comparison against the deterministically rendered ground truth projection.
+The solution PNG image renders the 2D projection as a grid of filled/empty cells.
 
 ### Difficulty Parameters
 
@@ -466,7 +464,7 @@ Concavities make the projection harder because removed interior voxels may or ma
 
 ### Verification Logic
 
-The verifier (`OrthoProjectionGenerator.verify()`) performs exact SVG string comparison between the candidate and the ground truth solution. Both SVGs are deterministically rendered from the same projection data, so a correct solution must produce an identical string.
+The verifier (`OrthoProjectionGenerator.verify()`) samples pixel colors at each grid cell center in the candidate PNG, classifying each cell as filled (#444444) or empty (#EEEEEE) based on Euclidean color distance. The extracted grid is compared cell-by-cell against the deterministically computed ground truth projection.
 
 ### Distractor Violation Types
 
@@ -494,7 +492,7 @@ The model must reconstruct the correct isometric view of the 3D solid that produ
 
 ### Solution Requirements
 
-The solution SVG renders the 3D voxel solid in isometric view. Verification is by exact SVG string comparison against the deterministically rendered ground truth.
+The solution PNG image renders the 3D voxel solid in isometric view.
 
 ### Difficulty Parameters
 
@@ -515,7 +513,7 @@ Higher ambiguity means the solid is thinned such that multiple 3D shapes could p
 
 ### Verification Logic
 
-The verifier (`IsoReconstructionGenerator.verify()`) performs exact SVG string comparison between the candidate and the ground truth solution. Both are deterministically rendered from the same voxel grid.
+The verifier (`IsoReconstructionGenerator.verify()`) computes the Structural Similarity Index (SSIM) between the candidate PNG and the ground truth PNG. A match requires SSIM >= 0.99999 (near-exact visual match). Both are deterministically rendered from the same voxel grid.
 
 ### Distractor Violation Types
 

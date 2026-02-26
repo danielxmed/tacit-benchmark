@@ -645,95 +645,124 @@ class MazeGenerator(BaseGenerator):
     # ------------------------------------------------------------------
 
     def verify(
-        self, puzzle: PuzzleInstance, candidate_svg: str
+        self, puzzle: PuzzleInstance, candidate_png: bytes
     ) -> VerificationResult:
-        """Verify a candidate solution SVG against the maze.
+        """Verify candidate PNG contains a valid solution path.
 
-        Extracts the path from the hidden text element in the SVG,
-        then checks:
-        1. Path starts at the maze start
-        2. Path ends at the maze end
-        3. All cells in the path are passages (no wall breaches)
-        4. Consecutive cells are adjacent or connected by a portal
+        Detects blue path pixels, maps to grid cells, verifies connectivity.
         """
-        # Extract path data from SVG
-        candidate_path = self._extract_path_from_svg(candidate_svg)
-        if candidate_path is None:
-            return VerificationResult(passed=False, reason="No path data found in SVG")
+        from tacit.core.cv_utils import (
+            color_distance,
+            hex_to_rgb,
+            png_to_numpy,
+            sample_color,
+        )
 
-        # Reconstruct puzzle data from the original puzzle SVG
-        original_path = self._extract_path_from_svg(puzzle.solution_svg)
-        if original_path is None:
-            return VerificationResult(
-                passed=False, reason="Cannot extract reference path"
-            )
-
-        # Re-generate puzzle data for full verification
-        # We need grids, portals, start, end from the puzzle
-        # Since we embed path data, we can verify structurally
+        # Reconstruct puzzle structure
         puzzle_data = self._reconstruct_puzzle_data(puzzle)
-
         if puzzle_data is None:
-            # Fallback: compare paths directly
-            if candidate_path == original_path:
-                return VerificationResult(passed=True)
-            return VerificationResult(passed=False, reason="Path mismatch")
+            # Fallback: compare against ground truth via SSIM
+            from tacit.core.cv_utils import compute_ssim
+            from tacit.core.renderer import svg_string_to_png
+
+            gt_png = svg_string_to_png(puzzle.solution_svg)
+            ssim = compute_ssim(gt_png, candidate_png)
+            if ssim > 0.95:
+                return VerificationResult(passed=True, details={"ssim": ssim})
+            return VerificationResult(
+                passed=False, reason=f"Cannot reconstruct maze; SSIM={ssim:.3f}"
+            )
 
         grids = puzzle_data["grids"]
         portals = puzzle_data["portals"]
         start = puzzle_data["start"]
         end = puzzle_data["end"]
+        num_layers = len(grids)
+        gs = grids[0].shape[0]
 
-        # Check start
-        if not candidate_path or candidate_path[0] != start:
+        img = png_to_numpy(candidate_png)
+        path_rgb = hex_to_rgb(STYLE["solution_color"])
+        layer_width = gs * CELL_PX
+
+        # Detect path cells: for each passage cell, sample a small region
+        # around the center and check if any pixel is blue.  Start/end
+        # markers may cover the exact center, so we probe a 3x3
+        # neighbourhood.  We skip wall cells to avoid false positives
+        # from portal-crossing lines that span the inter-layer gap.
+        path_cells: set[tuple[int, int, int]] = set()
+        _offsets = [(-1, -1), (-1, 0), (-1, 1),
+                    (0, -1),  (0, 0),  (0, 1),
+                    (1, -1),  (1, 0),  (1, 1)]
+        for layer in range(num_layers):
+            x_off = MARGIN_PX + layer * (layer_width + LAYER_GAP_PX)
+            y_off = MARGIN_PX
+            for r in range(gs):
+                for c in range(gs):
+                    if grids[layer][r, c] != PASSAGE:
+                        continue
+                    cx = int(x_off + c * CELL_PX + CELL_PX / 2)
+                    cy = int(y_off + r * CELL_PX + CELL_PX / 2)
+                    found = False
+                    for dy, dx in _offsets:
+                        sx, sy = cx + dx, cy + dy
+                        if sy < 0 or sy >= img.shape[0] or sx < 0 or sx >= img.shape[1]:
+                            continue
+                        pixel = sample_color(img, sx, sy)
+                        if color_distance(pixel, path_rgb) < 60:
+                            found = True
+                            break
+                    if found:
+                        path_cells.add((layer, r, c))
+
+        if not path_cells:
             return VerificationResult(
-                passed=False,
-                reason=f"Path does not start at {start}, starts at {candidate_path[0] if candidate_path else 'empty'}",
+                passed=False, reason="No path pixels detected in candidate PNG."
             )
 
-        # Check end
-        if candidate_path[-1] != end:
+        # Check start and end are in path
+        if start not in path_cells:
             return VerificationResult(
                 passed=False,
-                reason=f"Path does not end at {end}, ends at {candidate_path[-1]}",
+                reason=f"Path does not include start cell {start}.",
+            )
+        if end not in path_cells:
+            return VerificationResult(
+                passed=False,
+                reason=f"Path does not include end cell {end}.",
             )
 
-        # Build portal lookup
+        # Build portal lookup (wall breach is already handled by only
+        # scanning passage cells above)
         portal_set: set[tuple[tuple[int, int, int], tuple[int, int, int]]] = set()
         for a, b in portals:
             portal_set.add((a, b))
             portal_set.add((b, a))
 
-        # Check each step
-        for i in range(len(candidate_path)):
-            layer, r, c = candidate_path[i]
+        # Check connectivity: BFS from start through path cells
+        visited: set[tuple[int, int, int]] = set()
+        queue = [start]
+        visited.add(start)
+        while queue:
+            cell = queue.pop(0)
+            layer, r, c = cell
+            # Check 4-directional neighbors in same layer
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                neighbor = (layer, nr, nc)
+                if neighbor in path_cells and neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append(neighbor)
+            # Check portal connections
+            for a, b in portal_set:
+                if a == cell and b in path_cells and b not in visited:
+                    visited.add(b)
+                    queue.append(b)
 
-            # Check cell is a passage
-            if layer < 0 or layer >= len(grids):
-                return VerificationResult(
-                    passed=False,
-                    reason=f"Invalid layer {layer} at step {i}",
-                )
-            gs = grids[layer].shape[0]
-            if r < 0 or r >= gs or c < 0 or c >= gs:
-                return VerificationResult(
-                    passed=False,
-                    reason=f"Out of bounds ({layer},{r},{c}) at step {i}",
-                )
-            if grids[layer][r, c] != PASSAGE:
-                return VerificationResult(
-                    passed=False,
-                    reason=f"Wall breach at ({layer},{r},{c}) step {i}",
-                )
-
-            # Check adjacency with previous cell
-            if i > 0:
-                prev = candidate_path[i - 1]
-                if not self._is_adjacent_or_portal(prev, candidate_path[i], portal_set):
-                    return VerificationResult(
-                        passed=False,
-                        reason=f"Disconnected path at step {i}: {prev} -> {candidate_path[i]}",
-                    )
+        if end not in visited:
+            return VerificationResult(
+                passed=False,
+                reason="Path is not connected from start to end.",
+            )
 
         return VerificationResult(passed=True)
 

@@ -9,10 +9,11 @@ from tacit.generators.base import BaseGenerator
 def evaluate_generative(
     generator: BaseGenerator,
     puzzle: PuzzleInstance,
-    candidate_svg: str,
+    candidate_png: bytes,
 ) -> VerificationResult:
     """Evaluate a generative (image-output) response.
 
+    The candidate is a PNG image (bytes) produced by the model.
     Delegates to the task-specific generator's verify() method.
     """
-    return generator.verify(puzzle, candidate_svg)
+    return generator.verify(puzzle, candidate_png)

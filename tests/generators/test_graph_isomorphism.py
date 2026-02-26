@@ -1,6 +1,7 @@
 # tests/generators/test_graph_isomorphism.py
 import pytest
 from tacit.core.types import DifficultyParams
+from tacit.core.renderer import svg_string_to_png
 
 
 @pytest.fixture
@@ -24,7 +25,7 @@ class TestGraphIsomorphismGeneration:
     def test_solution_verifies(self, iso_gen):
         dp = DifficultyParams(level="easy", params={"nodes": 5, "distortion": 0.3})
         puzzle = iso_gen.generate(dp, seed=42)
-        result = iso_gen.verify(puzzle, puzzle.solution_svg)
+        result = iso_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
 
     def test_balanced_positive_negative(self, iso_gen):
@@ -67,13 +68,17 @@ class TestGraphIsomorphismVerification:
         puzzle = iso_gen.generate(dp, seed=42)
         # Distractors should be the opposite answer
         for distractor_svg in puzzle.distractor_svgs:
-            result = iso_gen.verify(puzzle, distractor_svg)
+            result = iso_gen.verify(puzzle, svg_string_to_png(distractor_svg))
             assert not result.passed
 
-    def test_arbitrary_svg_fails(self, iso_gen):
+    def test_arbitrary_png_fails(self, iso_gen):
         dp = DifficultyParams(level="easy", params={"nodes": 5, "distortion": 0.3})
         puzzle = iso_gen.generate(dp, seed=42)
-        result = iso_gen.verify(puzzle, "<svg>random</svg>")
+        # A blank white PNG should not parse as either answer
+        from tacit.core.renderer import create_canvas, svg_to_string
+        blank_canvas = create_canvas(200, 200)
+        blank_png = svg_string_to_png(svg_to_string(blank_canvas))
+        result = iso_gen.verify(puzzle, blank_png)
         assert not result.passed
 
 
@@ -89,7 +94,7 @@ class TestGraphIsomorphismDifficulty:
         dp = DifficultyParams(level="hard", params={"nodes": 10, "distortion": 0.8})
         puzzle = iso_gen.generate(dp, seed=42)
         assert puzzle.task == "graph_isomorphism"
-        result = iso_gen.verify(puzzle, puzzle.solution_svg)
+        result = iso_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
 
 

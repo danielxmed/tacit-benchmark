@@ -452,8 +452,8 @@ tacit evaluate --track generative \
 ### Publish to HuggingFace
 
 ```bash
-tacit publish --config configs/full_release.yaml \
-    --hf-repo tylerxdurden/TACIT-benchmark
+tacit publish --config configs/release.yaml \
+    --hf-repo tylerxdurden/TACIT-benchmark --dry-run
 ```
 
 ---

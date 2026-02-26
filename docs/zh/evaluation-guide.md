@@ -453,7 +453,7 @@ tacit evaluate --track generative --model-output ./results/ \
 ### 发布至 HuggingFace
 
 ```bash
-tacit publish --config configs/full_release.yaml \
+tacit publish --config configs/release.yaml \
     --hf-repo tylerxdurden/TACIT-benchmark
 ```
 

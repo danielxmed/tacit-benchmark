@@ -98,8 +98,11 @@ Optional dependency groups:
 # Generate 10 easy maze puzzles
 tacit generate --task maze --difficulty easy --count 10 --seed 42
 
-# Generate full benchmark suite from config
-tacit generate --config configs/default.yaml
+# Generate full benchmark suite from config (dev — 300 puzzles)
+tacit generate --config configs/default.yaml --output-dir data/
+
+# Generate release benchmark suite (6,000 puzzles × 3 resolutions)
+tacit generate --config configs/release.yaml --output-dir snapshot/
 
 # Evaluate a model on Track 1 (generative)
 tacit evaluate --track generative --model-output ./results/ --tasks all
@@ -108,7 +111,7 @@ tacit evaluate --track generative --model-output ./results/ --tasks all
 tacit evaluate --track discriminative --model-output ./results/ --tasks all
 
 # Publish frozen snapshot to HuggingFace
-tacit publish --config configs/full_release.yaml --hf-repo tylerxdurden/TACIT-benchmark
+tacit publish --config configs/release.yaml --hf-repo tylerxdurden/TACIT-benchmark --dry-run
 ```
 
 ---
@@ -133,6 +136,8 @@ tacit evaluate   Evaluate model outputs against ground truth
 tacit publish    Publish a frozen benchmark snapshot to HuggingFace
   --config PATH       YAML config for full release generation
   --hf-repo TEXT      HuggingFace repository (e.g., tylerxdurden/TACIT-benchmark)
+  --output-dir PATH   Output directory for snapshot (default: snapshot/)
+  --dry-run           Build snapshot locally without uploading
 ```
 
 ---

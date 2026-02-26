@@ -15,8 +15,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +70,7 @@ tags:
   - puzzle
   - multimodal
 size_categories:
-  - 1K<n<10K
+  - 10K<n<100K
 ---
 
 # TACIT Benchmark v{version}
@@ -177,31 +180,154 @@ def _write_placeholder_png(path: Path) -> None:
     path.write_bytes(_MINIMAL_PNG)
 
 
-def build_snapshot_structure(output_dir: Path, config: dict[str, Any]) -> Path:
+# ---------------------------------------------------------------------------
+# Real puzzle generation helper
+# ---------------------------------------------------------------------------
+
+_MAX_RETRIES = 3
+
+
+def _generate_and_write_puzzle(
+    task_name: str,
+    diff_name: str,
+    diff_params: dict[str, Any],
+    idx: int,
+    seed: int,
+    num_distractors: int,
+    diff_dir: Path,
+    resolutions: list[int],
+) -> dict[str, Any]:
+    """Generate one puzzle instance and write PNGs + metadata to *diff_dir*.
+
+    SVGs are generated once and rasterized to each resolution.  When
+    *resolutions* has a single entry the PNGs are written directly into
+    *diff_dir*; when it has multiple entries each resolution gets a
+    sub-directory (``diff_dir/{res}/``).
+
+    Retries up to ``_MAX_RETRIES`` times with seed offsets on failure.
+
+    Returns the per-puzzle metadata dict (suitable for ``meta_XXXX.json``).
+    """
+    from tacit.core.renderer import svg_string_to_png
+    from tacit.core.types import DifficultyParams
+    from tacit.generators.registry import get_generator
+
+    suffix = f"{idx:04d}"
+    puzzle_seed = seed + idx
+    last_error: Exception | None = None
+    multi = len(resolutions) > 1
+
+    for attempt in range(_MAX_RETRIES):
+        try:
+            effective_seed = puzzle_seed + attempt * 1000
+            gen = get_generator(task_name)
+            difficulty = DifficultyParams(level=diff_name, params=diff_params)
+            instance = gen.generate(difficulty, effective_seed, num_distractors)
+
+            # Collect all SVGs that need rasterizing
+            all_svgs: list[tuple[str, str]] = [
+                (f"puzzle_{suffix}.png", instance.puzzle_svg),
+                (f"solution_{suffix}.png", instance.solution_svg),
+            ]
+            distractor_files: list[tuple[str, str]] = []
+            for d_idx, d_svg in enumerate(instance.distractor_svgs):
+                distractor_files.append(
+                    (f"distractor_{d_idx:02d}.png", d_svg)
+                )
+
+            # Rasterize to each resolution
+            for res in resolutions:
+                if multi:
+                    res_dir = diff_dir / str(res)
+                    res_dir.mkdir(parents=True, exist_ok=True)
+                else:
+                    res_dir = diff_dir
+
+                for fname, svg in all_svgs:
+                    (res_dir / fname).write_bytes(
+                        svg_string_to_png(svg, width=res)
+                    )
+
+                dist_dir = res_dir / f"distractors_{suffix}"
+                dist_dir.mkdir(parents=True, exist_ok=True)
+                for fname, svg in distractor_files:
+                    (dist_dir / fname).write_bytes(
+                        svg_string_to_png(svg, width=res)
+                    )
+
+            # Build rich metadata (written once at diff_dir level)
+            puzzle_meta: dict[str, Any] = {
+                "task": task_name,
+                "difficulty": diff_name,
+                "difficulty_params": diff_params,
+                "seed": effective_seed,
+                "puzzle_id": instance.puzzle_id,
+                "distractors_count": num_distractors,
+                "distractor_violations": instance.distractor_violations,
+                "resolutions": resolutions,
+            }
+            (diff_dir / f"meta_{suffix}.json").write_text(
+                json.dumps(puzzle_meta, indent=2) + "\n"
+            )
+            return puzzle_meta
+
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            logger.warning(
+                "Attempt %d/%d failed for %s/%s/%04d: %s",
+                attempt + 1,
+                _MAX_RETRIES,
+                task_name,
+                diff_name,
+                idx,
+                exc,
+            )
+
+    raise RuntimeError(
+        f"Failed to generate {task_name}/{diff_name}/{idx:04d} "
+        f"after {_MAX_RETRIES} attempts"
+    ) from last_error
+
+
+# ---------------------------------------------------------------------------
+# Snapshot structure building
+# ---------------------------------------------------------------------------
+
+
+def build_snapshot_structure(
+    output_dir: Path,
+    config: dict[str, Any],
+    *,
+    use_generators: bool = False,
+    resolutions: list[int] | None = None,
+    progress_callback: Callable[[str], None] | None = None,
+) -> Path:
     """Build the full HuggingFace snapshot directory structure.
 
-    Creates the directory tree matching the design doc::
+    When *use_generators* is True and multiple resolutions are given the
+    layout nests a resolution sub-directory under each difficulty::
 
-        output_dir/
-        +-- README.md
-        +-- metadata.json
-        +-- task_01_maze/
-        |   +-- task_info.json
-        |   +-- easy/
-        |   |   +-- puzzle_0000.png
-        |   |   +-- solution_0000.png
-        |   |   +-- distractors_0000/
-        |   |   +-- meta_0000.json
-        |   +-- medium/ ...
-        +-- task_02_raven/ ...
+        task_01_maze/easy/512/puzzle_0000.png
+        task_01_maze/easy/1024/puzzle_0000.png
+
+    With a single resolution the layout stays flat (no resolution subdir).
 
     Args:
         output_dir: Root directory for the snapshot.
         config: Generation configuration dict (matching ``configs/*.yaml``).
+        use_generators: If *True*, run real generators and rasterize PNGs.
+            Defaults to *False* (write tiny placeholder PNGs).
+        resolutions: PNG widths in pixels. Defaults to ``[512]``.  When
+            *use_generators* is *False* this is ignored.
+        progress_callback: Optional callable invoked with a status string
+            after each puzzle is generated.
 
     Returns:
         The *output_dir* path.
     """
+    if resolutions is None:
+        resolutions = [512]
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     version = config.get("version", "0.1.0")
@@ -242,39 +368,55 @@ def build_snapshot_structure(output_dir: Path, config: dict[str, Any]) -> Path:
             json.dumps(task_info, indent=2) + "\n"
         )
 
-        # Create difficulty subdirectories with placeholder files
+        # Create difficulty subdirectories with puzzle files
         for diff_name, diff_params in difficulties.items():
             diff_dir = tdir / diff_name
             diff_dir.mkdir(parents=True, exist_ok=True)
 
             for idx in range(count_per_diff):
-                puzzle_seed = seed + idx
-                suffix = f"{idx:04d}"
-
-                # Puzzle and solution placeholder PNGs
-                _write_placeholder_png(diff_dir / f"puzzle_{suffix}.png")
-                _write_placeholder_png(diff_dir / f"solution_{suffix}.png")
-
-                # Distractors directory
-                dist_dir = diff_dir / f"distractors_{suffix}"
-                dist_dir.mkdir(parents=True, exist_ok=True)
-                for d_idx in range(distractors_per_puzzle):
-                    _write_placeholder_png(
-                        dist_dir / f"distractor_{d_idx:02d}.png"
+                if use_generators:
+                    _generate_and_write_puzzle(
+                        task_name=task_name,
+                        diff_name=diff_name,
+                        diff_params=diff_params,
+                        idx=idx,
+                        seed=seed,
+                        num_distractors=distractors_per_puzzle,
+                        diff_dir=diff_dir,
+                        resolutions=resolutions,
                     )
+                    if progress_callback is not None:
+                        progress_callback(
+                            f"{task_name}/{diff_name}/{idx:04d}"
+                        )
+                else:
+                    puzzle_seed = seed + idx
+                    suffix = f"{idx:04d}"
 
-                # Per-puzzle metadata
-                puzzle_meta = {
-                    "task": task_name,
-                    "difficulty": diff_name,
-                    "difficulty_params": diff_params,
-                    "seed": puzzle_seed,
-                    "puzzle_id": f"{task_name}_{diff_name}_{suffix}",
-                    "distractors_count": distractors_per_puzzle,
-                }
-                (diff_dir / f"meta_{suffix}.json").write_text(
-                    json.dumps(puzzle_meta, indent=2) + "\n"
-                )
+                    # Placeholder PNGs
+                    _write_placeholder_png(diff_dir / f"puzzle_{suffix}.png")
+                    _write_placeholder_png(diff_dir / f"solution_{suffix}.png")
+
+                    # Distractors directory
+                    dist_dir = diff_dir / f"distractors_{suffix}"
+                    dist_dir.mkdir(parents=True, exist_ok=True)
+                    for d_idx in range(distractors_per_puzzle):
+                        _write_placeholder_png(
+                            dist_dir / f"distractor_{d_idx:02d}.png"
+                        )
+
+                    # Per-puzzle metadata
+                    puzzle_meta = {
+                        "task": task_name,
+                        "difficulty": diff_name,
+                        "difficulty_params": diff_params,
+                        "seed": puzzle_seed,
+                        "puzzle_id": f"{task_name}_{diff_name}_{suffix}",
+                        "distractors_count": distractors_per_puzzle,
+                    }
+                    (diff_dir / f"meta_{suffix}.json").write_text(
+                        json.dumps(puzzle_meta, indent=2) + "\n"
+                    )
 
     # --- Compute checksums over the entire tree (excluding metadata.json) ---
     checksums = compute_checksums(output_dir)
@@ -367,14 +509,52 @@ def main() -> None:  # pragma: no cover
         action="store_true",
         help="Build snapshot structure without uploading to HuggingFace.",
     )
+    parser.add_argument(
+        "--no-generate",
+        action="store_true",
+        help="Write placeholder PNGs instead of running real generators.",
+    )
+    parser.add_argument(
+        "--resolution",
+        type=int,
+        nargs="+",
+        default=None,
+        help="PNG width(s) in pixels (default: from config or 512). "
+        "Pass multiple values for multi-resolution snapshots.",
+    )
     args = parser.parse_args()
 
     config = yaml.safe_load(Path(args.config).read_text())
     output_dir = Path(args.output)
 
-    print(f"Building snapshot structure in {output_dir} ...")
-    build_snapshot_structure(output_dir, config)
-    print(f"Snapshot structure created at {output_dir}")
+    use_generators = not args.no_generate
+
+    # Resolve resolutions: CLI flag > config > default
+    if args.resolution:
+        resolutions = sorted(args.resolution)
+    else:
+        resolutions = sorted(config.get("resolutions", [512]))
+
+    if use_generators:
+        res_str = ", ".join(f"{r}px" for r in resolutions)
+        print(f"Generating real puzzles at [{res_str}] into {output_dir} ...")
+    else:
+        print(f"Building placeholder snapshot in {output_dir} ...")
+
+    puzzle_count = [0]
+
+    def _progress(label: str) -> None:
+        puzzle_count[0] += 1
+        print(f"  [{puzzle_count[0]:>5d}] {label}")
+
+    build_snapshot_structure(
+        output_dir,
+        config,
+        use_generators=use_generators,
+        resolutions=resolutions,
+        progress_callback=_progress if use_generators else None,
+    )
+    print(f"Snapshot created at {output_dir}")
 
     if args.hf_repo and not args.dry_run:
         print(f"Uploading to {args.hf_repo} ...")

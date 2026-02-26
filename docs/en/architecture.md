@@ -77,6 +77,18 @@ Each of the 10 tasks has its own module:
 
 Shared utilities are in `_ca_common.py` (cellular automata simulation and rendering) and `_geometry_common.py` (voxel model generation, projection, and isometric rendering).
 
+### Generator Registry (`tacit/generators/registry.py`)
+
+The registry module provides a centralized mapping from task names to generator classes, used by the CLI and publish pipeline:
+
+```python
+from tacit.generators.registry import get_generator
+
+gen = get_generator("maze")  # Returns a MazeGenerator instance
+```
+
+`GENERATOR_CLASSES` is a dict of `{task_name: (module_path, class_name)}` tuples. Generators are lazy-imported on first use to keep startup fast.
+
 ---
 
 ## 2. Rendering Layer
@@ -120,7 +132,7 @@ Generator  -->  SVG Drawing  -->  svg_to_string()  -->  SVG string (generation s
                                   svg_to_png(width) -->  PNG bytes (verification + distribution)
 ```
 
-SVG remains the source of truth for puzzle generation. However, Track 1 verification operates on PNG images: generators rasterize solutions to PNG internally, and model candidates are submitted as PNG files. PNGs are rasterized at configurable resolutions (default: 256, 512 px) for distribution on HuggingFace.
+SVG remains the source of truth for puzzle generation. However, Track 1 verification operates on PNG images: generators rasterize solutions to PNG internally, and model candidates are submitted as PNG files. PNGs are rasterized at configurable resolutions (release default: 512, 1024, 2048 px) for distribution on HuggingFace. When multiple resolutions are configured, each difficulty directory contains resolution sub-directories (e.g., `easy/512/`, `easy/1024/`, `easy/2048/`).
 
 ---
 
@@ -285,6 +297,8 @@ Generate a full benchmark suite and push to HuggingFace.
 | `--config` | path | Yes | Generation config |
 | `--hf-repo` | string | Yes | HuggingFace repository |
 | `--version-tag` | string | No | Version tag |
+| `--output-dir` | path | No (default: `snapshot/`) | Output directory for snapshot |
+| `--dry-run` | flag | No | Build snapshot locally without uploading |
 
 ---
 
@@ -294,37 +308,48 @@ Generate a full benchmark suite and push to HuggingFace.
 
 The publish pipeline generates a frozen, checksummed snapshot of the benchmark for distribution on HuggingFace. The pipeline:
 
-1. Reads the generation config (e.g., `configs/full_release.yaml`).
+1. Reads the generation config (e.g., `configs/release.yaml`).
 2. Generates all puzzles for all tasks and difficulty levels.
-3. Rasterizes SVGs to multi-resolution PNGs.
+3. Rasterizes SVGs to multi-resolution PNGs (one SVG generation, multiple rasterizations).
 4. Computes SHA-256 checksums for all artifacts.
 5. Creates metadata JSON with version, seed, generation parameters, and checksums.
 6. Pushes to the specified HuggingFace repository using `huggingface_hub`.
 
+Generation includes retry logic (up to 3 attempts with seed offsets) for robustness.
+
 ### HuggingFace snapshot structure
+
+With multiple resolutions (e.g., 512, 1024, 2048), each difficulty directory contains resolution sub-directories:
 
 ```
 tylerxdurden/TACIT-benchmark/
 ├── README.md
 ├── metadata.json
 ├── task_01_maze/
+│   ├── task_info.json
 │   ├── easy/
-│   │   ├── puzzle_0042.png
-│   │   ├── solution_0042.png
-│   │   ├── distractors_0042/
-│   │   │   ├── distractor_0.png
-│   │   │   ├── distractor_1.png
-│   │   │   ├── distractor_2.png
-│   │   │   └── distractor_3.png
-│   │   └── meta_0042.json
+│   │   ├── meta_0000.json
+│   │   ├── 512/
+│   │   │   ├── puzzle_0000.png
+│   │   │   ├── solution_0000.png
+│   │   │   └── distractors_0000/
+│   │   │       ├── distractor_00.png
+│   │   │       └── ...
+│   │   ├── 1024/
+│   │   │   ├── puzzle_0000.png
+│   │   │   └── ...
+│   │   └── 2048/
+│   │       ├── puzzle_0000.png
+│   │       └── ...
 │   ├── medium/
 │   └── hard/
-│   └── task_info.json
 ├── task_02_raven/
 │   └── ...
 └── task_10_iso_reconstruction/
     └── ...
 ```
+
+With a single resolution, PNGs are written directly under the difficulty directory (no resolution subdirectory).
 
 ---
 
@@ -349,6 +374,7 @@ tacit_benchmark_0.1.0/
 │   │       └── knot_parser.py              # Answer label extraction
 │   ├── generators/
 │   │   ├── base.py                         # BaseGenerator ABC (template method)
+│   │   ├── registry.py                     # Centralized task→generator mapping
 │   │   ├── _ca_common.py                   # CA simulation, rule tables, grid/rule PNG parsing
 │   │   ├── _geometry_common.py             # Voxel generation, projection, isometric rendering
 │   │   ├── maze.py                         # Task 1
@@ -369,8 +395,8 @@ tacit_benchmark_0.1.0/
 │   │   └── report.py                       # JSON report generation
 │   └── cli.py                              # Click CLI (generate, evaluate, publish)
 ├── configs/
-│   ├── default.yaml                        # Development config
-│   └── full_release.yaml                   # Full benchmark config
+│   ├── default.yaml                        # Development/test config (10 per difficulty)
+│   └── release.yaml                        # Release config (200 per difficulty, multi-resolution)
 ├── scripts/
 │   └── publish_hf.py                       # HuggingFace publish logic
 ├── tests/                                  # Test suite

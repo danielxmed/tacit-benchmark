@@ -8,21 +8,16 @@ from tacit.core.types import PuzzleInstance, VerificationResult
 
 
 class BaseVerifier(ABC):
-    """Abstract base for task-specific verifiers.
-
-    Each task implements:
-    - extract_structure: parse SVG into a structural representation
-    - verify: check if a candidate solution is correct
-    """
+    """Abstract base for task-specific verifiers."""
 
     @abstractmethod
     def verify(
-        self, puzzle: PuzzleInstance, candidate_svg: str
+        self, puzzle: PuzzleInstance, candidate_png: bytes
     ) -> VerificationResult:
-        """Verify a candidate solution against the puzzle."""
+        """Verify a candidate solution PNG against the puzzle."""
         ...
 
     @abstractmethod
-    def extract_structure(self, svg_string: str) -> Any:
-        """Extract structural representation from SVG for verification."""
+    def extract_structure(self, png_bytes: bytes) -> Any:
+        """Extract structural representation from PNG for verification."""
         ...

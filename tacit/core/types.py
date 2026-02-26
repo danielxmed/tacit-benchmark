@@ -42,6 +42,8 @@ class PuzzleInstance:
     distractor_svgs: list[str]
     distractor_violations: list[str]
     metadata: dict[str, Any] = field(default_factory=dict)
+    puzzle_png: bytes | None = None
+    solution_png: bytes | None = None
 
     def __post_init__(self) -> None:
         if len(self.distractor_svgs) != len(self.distractor_violations):
@@ -60,7 +62,7 @@ class GeneratorProtocol(Protocol):
         """Generate a puzzle instance with solution and distractors."""
         ...
 
-    def verify(self, puzzle: PuzzleInstance, candidate_svg: str) -> VerificationResult:
+    def verify(self, puzzle: PuzzleInstance, candidate_png: bytes) -> VerificationResult:
         """Verify a candidate solution against the puzzle."""
         ...
 

@@ -3,6 +3,7 @@
 import pytest
 import numpy as np
 from tacit.core.types import DifficultyParams
+from tacit.core.renderer import svg_string_to_png
 
 
 @pytest.fixture
@@ -26,14 +27,14 @@ class TestOrthoProjectionGeneration:
     def test_solution_verifies(self, ortho_gen):
         dp = DifficultyParams(level="easy", params={"faces": 6, "concavities": 0})
         puzzle = ortho_gen.generate(dp, seed=42)
-        result = ortho_gen.verify(puzzle, puzzle.solution_svg)
+        result = ortho_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
 
     def test_distractors_fail(self, ortho_gen):
         dp = DifficultyParams(level="easy", params={"faces": 6, "concavities": 0})
         puzzle = ortho_gen.generate(dp, seed=42, num_distractors=4)
         for svg in puzzle.distractor_svgs:
-            result = ortho_gen.verify(puzzle, svg)
+            result = ortho_gen.verify(puzzle, svg_string_to_png(svg))
             assert not result.passed
 
     def test_puzzle_svg_is_valid(self, ortho_gen):
@@ -83,7 +84,7 @@ class TestOrthoProjectionWithConcavities:
     def test_solution_verifies_with_concavities(self, ortho_gen):
         dp = DifficultyParams(level="medium", params={"faces": 12, "concavities": 2})
         puzzle = ortho_gen.generate(dp, seed=42)
-        result = ortho_gen.verify(puzzle, puzzle.solution_svg)
+        result = ortho_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
         assert result.passed
 
 
@@ -94,5 +95,5 @@ class TestOrthoProjectionMultipleSeeds:
         dp = DifficultyParams(level="easy", params={"faces": 6, "concavities": 0})
         for seed in range(5):
             puzzle = ortho_gen.generate(dp, seed=seed)
-            result = ortho_gen.verify(puzzle, puzzle.solution_svg)
+            result = ortho_gen.verify(puzzle, svg_string_to_png(puzzle.solution_svg))
             assert result.passed, f"Ortho projection seed={seed} failed verification"

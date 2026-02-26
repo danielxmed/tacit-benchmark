@@ -163,20 +163,81 @@ class OrthoProjectionGenerator(BaseGenerator):
         return ["wrong_axis", "missing_feature", "extra_feature", "mirrored"]
 
     def verify(
-        self, puzzle: PuzzleInstance, candidate_svg: str
+        self, puzzle: PuzzleInstance, candidate_png: bytes
     ) -> VerificationResult:
-        """Verify by re-computing the projection and comparing SVG strings.
+        """Verify candidate PNG shows the correct 2D projection grid."""
+        from tacit.core.cv_utils import (
+            color_distance,
+            hex_to_rgb,
+            png_to_numpy,
+            sample_color,
+        )
 
-        The canonical verification is: the candidate SVG must exactly match the
-        solution SVG string (both are deterministically rendered from the same
-        projection data).
-        """
-        if candidate_svg == puzzle.solution_svg:
-            return VerificationResult(passed=True, reason="Projection matches ground truth.")
+        # Regenerate expected projection
+        rng = np.random.default_rng(puzzle.seed)
+        puzzle_data, solution_data = self._generate_puzzle(puzzle.difficulty, rng)
+        expected_proj = solution_data["projection"]
+        rows, cols = expected_proj.shape
+
+        img = png_to_numpy(candidate_png)
+
+        # Rendering constants from _geometry_common.render_projection_svg
+        canvas_size = 300
+        cell_size = 20.0
+        grid_w = cols * cell_size
+        grid_h = rows * cell_size
+        base_offset_x = (canvas_size - grid_w) / 2
+        base_offset_y = (canvas_size - grid_h) / 2
+
+        filled_rgb = hex_to_rgb("#444444")
+        empty_rgb = hex_to_rgb("#EEEEEE")
+
+        # The solution SVG is rendered with a label (offset_y += 10),
+        # but distractors are rendered without one (no offset shift).
+        # Try both offsets and use the best match.
+        best_result: VerificationResult | None = None
+        best_diff = rows * cols + 1
+
+        for label_shift in (0, 10):
+            offset_x = base_offset_x
+            offset_y = base_offset_y + label_shift
+
+            candidate_proj = np.zeros((rows, cols), dtype=bool)
+            too_small = False
+            for r in range(rows):
+                for c in range(cols):
+                    cx = int(offset_x + c * cell_size + cell_size / 2)
+                    cy = int(offset_y + r * cell_size + cell_size / 2)
+                    if cy >= img.shape[0] or cx >= img.shape[1]:
+                        too_small = True
+                        break
+                    pixel = sample_color(img, cx, cy)
+                    dist_filled = color_distance(pixel, filled_rgb)
+                    dist_empty = color_distance(pixel, empty_rgb)
+                    candidate_proj[r, c] = dist_filled < dist_empty
+                if too_small:
+                    break
+
+            if too_small:
+                continue
+
+            if np.array_equal(candidate_proj, expected_proj):
+                return VerificationResult(passed=True)
+
+            diff_count = int(np.sum(candidate_proj != expected_proj))
+            if diff_count < best_diff:
+                best_diff = diff_count
+                best_result = VerificationResult(
+                    passed=False,
+                    reason=f"Projection mismatch: {diff_count} cells differ.",
+                    details={"diff_count": diff_count},
+                )
+
+        if best_result is not None:
+            return best_result
 
         return VerificationResult(
-            passed=False,
-            reason="Candidate projection does not match ground truth.",
+            passed=False, reason="Candidate PNG too small for grid."
         )
 
     def difficulty_axes(self) -> list[DifficultyRange]:

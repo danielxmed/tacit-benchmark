@@ -32,6 +32,8 @@ dependencies = [
     "numpy-stl>=3.0",
     "pyyaml>=6.0",
     "click>=8.1",
+    "opencv-python>=4.8",
+    "scikit-image>=0.21",
 ]
 
 [project.optional-dependencies]

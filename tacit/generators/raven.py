@@ -508,52 +508,25 @@ class RavenGenerator(BaseGenerator):
         return ["wrong_shape", "wrong_color", "wrong_rotation", "wrong_count"]
 
     def verify(
-        self, puzzle: PuzzleInstance, candidate_svg: str
+        self, puzzle: PuzzleInstance, candidate_png: bytes
     ) -> VerificationResult:
-        """Verify a candidate solution against the expected answer.
+        """Verify candidate PNG tile matches expected solution via SSIM."""
+        from tacit.core.cv_utils import compute_ssim
+        from tacit.core.renderer import svg_string_to_png
 
-        Extracts tile attributes from the candidate SVG's embedded data
-        and compares them to the expected answer tile attributes.
-        """
-        # Extract expected answer from puzzle metadata or regenerate
-        # We embed attributes in the solution SVG as data-tacit-* comments
-        expected = _extract_tile_attrs(puzzle.solution_svg)
-        candidate = _extract_tile_attrs(candidate_svg)
+        ground_truth_png = svg_string_to_png(puzzle.solution_svg)
+        similarity = compute_ssim(ground_truth_png, candidate_png)
 
-        if expected is None:
+        SSIM_THRESHOLD = 0.997
+        if similarity >= SSIM_THRESHOLD:
             return VerificationResult(
-                passed=False,
-                reason="Could not extract expected tile attributes from solution SVG",
+                passed=True,
+                details={"ssim": round(similarity, 4)},
             )
-
-        if candidate is None:
-            return VerificationResult(
-                passed=False,
-                reason="Could not extract tile attributes from candidate SVG",
-            )
-
-        # Compare all attributes
-        mismatches: dict[str, Any] = {}
-        exp_dict = expected.to_dict()
-        cand_dict = candidate.to_dict()
-
-        for key in exp_dict:
-            if exp_dict[key] != cand_dict[key]:
-                mismatches[key] = {
-                    "expected": exp_dict[key],
-                    "got": cand_dict[key],
-                }
-
-        if mismatches:
-            return VerificationResult(
-                passed=False,
-                reason=f"Tile attributes do not match: {list(mismatches.keys())}",
-                details={"mismatches": mismatches},
-            )
-
         return VerificationResult(
-            passed=True,
-            reason="All tile attributes match",
+            passed=False,
+            reason=f"Tile SSIM {similarity:.3f} below threshold {SSIM_THRESHOLD}.",
+            details={"ssim": round(similarity, 4)},
         )
 
     def difficulty_axes(self) -> list[DifficultyRange]:
